@@ -2,6 +2,12 @@ const KEY = 'evaSuneung.v1';
 const TYPES = { mc: '객관식', multi: '복수선택', short: '단답', essay: '서술(수동)' };
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const PAL = ['#2559a8', '#1e7a52', '#b45309', '#6f42c1', '#b0306f', '#0b7285']; // 흰 글씨 대비 4.5:1 이상 // 영역별 대표색 (엑셀 내보내기와 같은 순서)
+const colOf = (s) => PAL[S.config.subjects.indexOf(s) % PAL.length];
+const sv = (s) => `style="--c:${colOf(s)}"`; // CSS 변수로 영역색 전달
+const dot = (s) => `<i class="dot" ${sv(s)}></i>`;
+const chip = (g) => `<span class="g g${g}">${g}</span>`; // 등급 배지
+const heat = (p) => (p >= 80 ? 'cg' : p >= 50 ? 'cm' : 'cb'); // 정답률 색: 초록/노랑/빨강
 const own = (o, k) => Object.hasOwn(o || {}, k);
 const safe = (n) => (n in {} ? n + '_' : n); // 'constructor', '__proto__' 같은 이름은 객체 키로 쓰면 깨지므로 변형
 const f1 = (x) => (Math.round(x * 10) / 10).toFixed(1);
@@ -116,7 +122,7 @@ function setup() {
 ${q.type === 'short' ? `<br><input class="a" value="${esc(q.half)}" data-s="${s.id}" data-n="${q.n}" data-f="half" placeholder="반만 인정할 표기 (쉼표로 구분)">
 <br><input class="a" value="${esc(q.wrong)}" data-s="${s.id}" data-n="${q.n}" data-f="wrong" placeholder="오답으로 확정한 표기 (검토 목록에서 숨김)">` : ''}</td></tr>`;
     }).join('');
-    return `<details data-k="s-${s.id}"><summary>${s.name} <span class="mut">${s.group === 'common' ? '공통' : '선택'} · ${s.questions.length}문항</span>
+    return `<details class="sj" ${sv(s)} data-k="s-${s.id}"><summary>${dot(s)}${s.name} <span class="mut">${s.group === 'common' ? '공통' : '선택'} · ${s.questions.length}문항</span>
  ${missing ? `<span class="badge bad">정답 ${missing}개 비어 있음</span>` : '<span class="badge ok">✓ 입력 완료</span>'}</summary>
 <table><tr><th>번호</th><th>구분</th><th>유형</th><th>배점</th><th>정답</th></tr>${rows}</table></details>`;
   }).join('');
@@ -180,7 +186,7 @@ ${cols.map((s) => `<td>${r.res.subjects[s.id].taken ? '✓' : ''}</td>`).join(''
 <select id="defSubj"><option value="">(선택 안 함)</option>${S.config.subjects.map((s) => `<option value="${s.id}">${s.name}</option>`).join('')}</select></details>
 <h3>총 응시자 ${st.rows.length}명</h3>
 <p class="mut">${cols.map((s) => `${s.name} ${st.subjects[s.id].n}명`).join(' · ')}<br>캠프별 ${Object.entries(st.camps).map(([c, v]) => `${c} ${v.n}명`).join(' · ') || '-'}</p>
-${st.rows.length ? `<table><tr><th>이름</th><th>캠프</th>${cols.map((s) => `<th>${s.name}</th>`).join('')}<th>경고</th><th></th></tr>${rows}</table>
+${st.rows.length ? `<table><tr><th>이름</th><th>캠프</th>${cols.map((s) => `<th class="sh" ${sv(s)}>${s.name}</th>`).join('')}<th>경고</th><th></th></tr>${rows}</table>
 <button data-act="clearAll">전체 삭제</button>` : ''}
 ${log.length ? `<details data-k="log"><summary>가져오기 기록</summary><pre>${esc(log.slice(-40).join('\n'))}</pre></details>` : ''}`;
 }
@@ -194,13 +200,13 @@ function manual() {
   for (const s of S.config.subjects) for (const q of s.questions) {
     if (q.type === 'essay') {
       const rows = st.rows.map((r) => ({ r, d: r.res.subjects[s.id].detail[q.n] })).filter((x) => x.d && !Core.blank(x.d.raw));
-      if (rows.length) out.push(`<details data-k="m-${s.id}-${q.n}"><summary>${s.name} ${q.n}번 (서술, ${q.pts}점) <span class="mut">${rows.filter((x) => x.d.pending).length}건 미채점</span> ${refShort(q)}</summary>
+      if (rows.length) out.push(`<details class="sj" ${sv(s)} data-k="m-${s.id}-${q.n}"><summary>${dot(s)}${s.name} ${q.n}번 (서술, ${q.pts}점) <span class="mut">${rows.filter((x) => x.d.pending).length}건 미채점</span> ${refShort(q)}</summary>
 ${refBox(q)}<table>${rows.map(({ r, d }) => `<tr><td class="l">${esc(r.name)}</td><td class="l" style="white-space:normal;max-width:520px">${esc(d.raw)}</td>
 <td><input class="n" type="number" min="0" max="${q.pts}" step="0.5" value="${S.manual[r.name]?.[s.id]?.[q.n] ?? ''}" data-mp='${esc(JSON.stringify([s.id, q.n, r.name]))}'> / ${q.pts}</td></tr>`).join('')}</table></details>`);
     } else if (q.type === 'short') {
       const done = new Set(String(q.wrong || '').split(',').map(Core.normShort)); // 정답/반만/오답 처리한 표기는 다시 안 뜸
       const wrong = Object.entries(st.questions[s.id][q.n].dist).filter(([k, v]) => !v.ok && !v.half && !done.has(k) && k !== '무응답').sort((a, b) => b[1].count - a[1].count);
-      if (wrong.length) out.push(`<details data-k="m-${s.id}-${q.n}"><summary>${s.name} ${q.n}번 단답 오답 검토 <span class="mut">(${wrong.length}종)</span> ${refShort(q)}</summary>
+      if (wrong.length) out.push(`<details class="sj" ${sv(s)} data-k="m-${s.id}-${q.n}"><summary>${dot(s)}${s.name} ${q.n}번 단답 오답 검토 <span class="mut">(${wrong.length}종)</span> ${refShort(q)}</summary>
 ${refBox(q)}<table>
 ${wrong.map(([, v]) => `<tr><td class="l">${esc(v.raw)}</td><td>${v.count}명</td><td><button data-act="accept" data-s="${s.id}" data-n="${q.n}" data-raw="${esc(v.raw)}">정답 인정</button> <button data-act="half" data-s="${s.id}" data-n="${q.n}" data-raw="${esc(v.raw)}">반만 인정</button> <button data-act="wrong" data-s="${s.id}" data-n="${q.n}" data-raw="${esc(v.raw)}">오답 처리</button></td></tr>`).join('')}</table></details>`);
     }
@@ -213,12 +219,12 @@ function report() {
   const st = stats(), common = S.config.subjects.filter((s) => s.group === 'common');
   const sels = S.config.subjects.filter((s) => s.group === 'select' && st.subjects[s.id].n > 0);
   const cols = showStd ? 4 : 1, rs = showStd ? 2 : 1;
-  const head = `<tr><th rowspan="${rs}">이름</th><th rowspan="${rs}">캠프</th>${common.map((s) => `<th colspan="${cols}">${s.name}</th>`).join('')}${sels.map((s) => `<th rowspan="${rs}">${s.name}<br><small>선택</small></th>`).join('')}<th rowspan="${rs}">총점</th><th rowspan="${rs}">순위</th><th rowspan="${rs}">백분위</th><th rowspan="${rs}">비고</th></tr>`
-    + (showStd ? `<tr>${common.map(() => '<th>원점수</th><th>표준</th><th>백분위</th><th>등급</th>').join('')}</tr>` : '');
+  const head = `<tr><th rowspan="${rs}">이름</th><th rowspan="${rs}">캠프</th>${common.map((s) => `<th class="sh gl" colspan="${cols}" ${sv(s)}>${s.name}</th>`).join('')}${sels.map((s) => `<th class="sh gl" rowspan="${rs}" ${sv(s)}>${s.name}<br><small>선택</small></th>`).join('')}<th rowspan="${rs}">총점</th><th rowspan="${rs}">순위</th><th rowspan="${rs}">백분위</th><th rowspan="${rs}">비고</th></tr>`
+    + (showStd ? `<tr>${common.map((s) => `<th class="gl" ${sv(s)}>원점수</th><th>표준</th><th>백분위</th><th>등급</th>`).join('')}</tr>` : '');
   const rows = [...st.rows].sort((a, b) => (a.res.rank ?? 1e9) - (b.res.rank ?? 1e9)).map((r) => `<tr><td class="l">${esc(r.name)}</td><td>${r.res.camp || '-'}</td>
-${common.map((s) => { const o = r.res.subjects[s.id]; return !o.taken ? `<td colspan="${cols}" class="mut">미응시</td>` : showStd ? `<td>${o.score}</td><td>${f1(o.std)}</td><td>${f1(o.pct)}</td><td>${o.grade}</td>` : `<td>${o.score}</td>`; }).join('')}
-${sels.map((s) => `<td>${r.res.subjects[s.id].taken ? r.res.subjects[s.id].score : ''}</td>`).join('')}
-<td><b>${r.res.total}</b></td><td>${r.res.rank ?? '-'}</td><td>${r.res.pct == null ? '-' : f1(r.res.pct)}</td>
+${common.map((s) => { const o = r.res.subjects[s.id]; return !o.taken ? `<td colspan="${cols}" class="mut gl" ${sv(s)}>미응시</td>` : showStd ? `<td class="gl" ${sv(s)}>${o.score}</td><td>${f1(o.std)}</td><td>${f1(o.pct)}</td><td>${chip(o.grade)}</td>` : `<td class="gl" ${sv(s)}>${o.score}</td>`; }).join('')}
+${sels.map((s) => `<td class="gl" ${sv(s)}>${r.res.subjects[s.id].taken ? r.res.subjects[s.id].score : ''}</td>`).join('')}
+<td class="tot"><b>${r.res.total}</b></td><td class="rk${r.res.rank <= 3 ? r.res.rank : ''}">${r.res.rank ?? '-'}</td><td>${r.res.pct == null ? '-' : f1(r.res.pct)}</td>
 <td class="bad">${r.res.pending ? `미채점 ${r.res.pending}` : ''} ${esc(r.res.flags.join(' / '))}</td></tr>`).join('');
   const who = sel && st.rows.find((r) => r.name === sel);
   return guide('④ 채점 결과입니다.', '총점 = 공통 3영역 합. 아래에서 이름을 고르면 문항별 정오표가 나옵니다.')
@@ -226,40 +232,40 @@ ${sels.map((s) => `<td>${r.res.subjects[s.id].taken ? r.res.subjects[s.id].score
 <table>${head}${rows}</table>
 ${subjectReport(st)}
 <p>개인 상세: <select id="selStudent"><option value="">이름 선택</option>${st.rows.map((r) => `<option ${r.name === sel ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></p>
-${who ? S.config.subjects.map((s) => { const o = who.res.subjects[s.id]; if (!o.taken) return ''; return `<details open><summary>${s.name} ${o.score}/${o.max}</summary><table><tr>${Object.keys(o.detail).map((n) => `<th>${n}</th>`).join('')}</tr>
-<tr>${Object.values(o.detail).map((d) => `<td class="${d.pending ? 'mut' : d.ok ? 'ok' : d.pts ? '' : 'bad'}">${d.pending ? '…' : d.pts}</td>`).join('')}</tr></table></details>`; }).join('') : ''}`;
+${who ? S.config.subjects.map((s) => { const o = who.res.subjects[s.id]; if (!o.taken) return ''; return `<details open class="sj" ${sv(s)}><summary>${dot(s)}${s.name} ${o.score}/${o.max}</summary><table class="ct" ${sv(s)}><tr>${Object.keys(o.detail).map((n) => `<th>${n}</th>`).join('')}</tr>
+<tr>${Object.values(o.detail).map((d) => `<td class="${d.pending ? 'cp' : d.ok ? 'cg' : d.pts ? 'cm' : 'cb'}">${d.pending ? '…' : d.pts}</td>`).join('')}</tr></table></details>`; }).join('') : ''}`;
 }
 
 // 영역별 성적: 영역을 고르면 그 영역 응시자의 순위·원점수·표준점수·백분위·등급을 따로 보여줌 (선택영역 포함)
 function subjectReport(st) {
   const s = subj(rSubj) || S.config.subjects[0], v = st.subjects[s.id];
   const takers = st.rows.filter((r) => r.res.subjects[s.id].taken).sort((a, b) => a.res.subjects[s.id].rank - b.res.subjects[s.id].rank || a.name.localeCompare(b.name, 'ko'));
-  const grades = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((g) => `${g}등급 ${takers.filter((r) => r.res.subjects[s.id].grade === g).length}명`).join(' · ');
-  const rows = takers.map((r) => { const o = r.res.subjects[s.id]; return `<tr><td>${o.rank}</td><td class="l">${esc(r.name)}</td>${s.camps ? `<td>${r.res.camp || '-'}</td>` : ''}<td><b>${o.score}</b> / ${o.max}</td><td>${f1(o.std)}</td><td>${f1(o.pct)}</td><td>${o.grade}</td><td class="bad">${o.pending ? `미채점 ${o.pending}` : ''}</td></tr>`; }).join('');
-  return `<h3>영역별 성적 <select id="subjSel">${S.config.subjects.map((x) => `<option value="${x.id}" ${x.id === s.id ? 'selected' : ''}>${x.name}${x.group === 'select' ? ' (선택)' : ''}</option>`).join('')}</select></h3>
-<p class="mut">응시 ${v.n}명 · 평균 ${f1(v.mean)} · 표준편차 ${f1(v.sd)} · 최고 ${v.max} · 최저 ${v.min}<br>${grades}</p>
-${takers.length ? `<table><tr><th>순위</th><th>이름</th>${s.camps ? '<th>캠프</th>' : ''}<th>원점수</th><th>표준점수</th><th>백분위</th><th>등급</th><th>비고</th></tr>${rows}</table>` : '<p class="mut">이 영역 응시자가 없습니다.</p>'}`;
+  const grades = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((g) => `<span class="g g${g}">${g}등급 ${takers.filter((r) => r.res.subjects[s.id].grade === g).length}명</span>`).join(' ');
+  const rows = takers.map((r) => { const o = r.res.subjects[s.id]; return `<tr><td class="rk${o.rank <= 3 ? o.rank : ''}">${o.rank}</td><td class="l">${esc(r.name)}</td>${s.camps ? `<td>${r.res.camp || '-'}</td>` : ''}<td><b>${o.score}</b> / ${o.max}</td><td>${f1(o.std)}</td><td>${f1(o.pct)}</td><td>${chip(o.grade)}</td><td class="bad">${o.pending ? `미채점 ${o.pending}` : ''}</td></tr>`; }).join('');
+  return `<h3 class="sec">영역별 성적 <select id="subjSel">${S.config.subjects.map((x) => `<option value="${x.id}" ${x.id === s.id ? 'selected' : ''}>${x.name}${x.group === 'select' ? ' (선택)' : ''}</option>`).join('')}</select></h3>
+<p class="mut sum" ${sv(s)}>응시 <b>${v.n}</b>명 · 평균 <b>${f1(v.mean)}</b> · 표준편차 <b>${f1(v.sd)}</b> · 최고 <b>${v.max}</b> · 최저 <b>${v.min}</b><br>${grades}</p>
+${takers.length ? `<table class="ct" ${sv(s)}><tr><th>순위</th><th>이름</th>${s.camps ? '<th>캠프</th>' : ''}<th>원점수</th><th>표준점수</th><th>백분위</th><th>등급</th><th>비고</th></tr>${rows}</table>` : '<p class="mut">이 영역 응시자가 없습니다.</p>'}`;
 }
 
 // ---------- 5. 문항 분석 ----------
 function items() {
   const st = stats(), s = subj(qSubj);
-  const ss = S.config.subjects.map((x) => { const v = st.subjects[x.id]; return `<tr><td class="l">${x.name}</td><td>${v.n}</td><td>${f1(v.mean)}</td><td>${f1(v.sd)}</td><td>${v.max}</td><td>${v.min}</td></tr>`; }).join('');
+  const ss = S.config.subjects.map((x) => { const v = st.subjects[x.id]; return `<tr><td class="l sc" ${sv(x)}>${x.name}</td><td>${v.n}</td><td>${f1(v.mean)}</td><td>${f1(v.sd)}</td><td>${v.max}</td><td>${v.min}</td></tr>`; }).join('');
   const camps = Object.entries(st.camps).map(([c, v]) => `<tr><td>${c}</td><td>${v.n}</td><td>${f1(v.sum / v.n)}</td></tr>`).join('');
   const bins = {}; st.totals.forEach((t) => { const b = Math.floor(t / 10) * 10; bins[b] = (bins[b] || 0) + 1; });
   const hist = Object.entries(bins).sort((a, b) => a[0] - b[0]).map(([b, c]) => `<tr><td>${b}~${+b + 9}</td><td class="l"><span class="bar" style="width:${c * 12}px"></span> ${c}</td></tr>`).join('');
   let qs = s.questions.map((q) => ({ q, v: st.questions[s.id][q.n] }));
   if (qSort) qs.sort((a, b) => b.v.wrongRate - a.v.wrongRate);
-  const rows = qs.map(({ q, v }) => `<tr><td>${q.n}</td><td>${TYPES[q.type]}</td><td>${q.pts}</td><td>${esc(q.ans)}</td><td>${v.att}</td><td>${f1((1 - v.wrongRate) * 100)}%</td><td class="${v.wrongRate >= 0.6 ? 'bad' : ''}">${f1(v.wrongRate * 100)}%</td>
+  const rows = qs.map(({ q, v }) => `<tr><td>${q.n}</td><td>${TYPES[q.type]}</td><td>${q.pts}</td><td class="wrap">${esc(q.ans)}</td><td>${v.att}</td><td class="${v.att ? heat((1 - v.wrongRate) * 100) : ''}">${f1((1 - v.wrongRate) * 100)}%</td><td class="${v.att ? heat((1 - v.wrongRate) * 100) : ''}">${f1(v.wrongRate * 100)}%</td>
 <td class="l">${Object.entries(v.dist).sort((a, b) => b[1].count - a[1].count).slice(0, 6).map(([k, d]) => `${q.type === 'short' || q.type === 'essay' ? esc(d.raw || k) : esc(k)}:${d.count}`).join(' · ')}</td></tr>`).join('');
-  return guide('⑤ 문항·영역 통계입니다.', '오답률 60% 이상 문항은 빨간색입니다. 응답 분포는 "선택지:인원"입니다.')
+  return guide('⑤ 문항·영역 통계입니다.', '정답률 80% 이상은 초록, 50% 미만은 빨강으로 칠해집니다. 응답 분포는 "선택지:인원"입니다.')
     + `<p><button data-act="exportXlsx">엑셀로 내보내기</button></p>
-<h3>문항별 분석 <select id="qSubj">${S.config.subjects.map((x) => `<option value="${x.id}" ${x.id === qSubj ? 'selected' : ''}>${x.name}</option>`).join('')}</select>
+<h3 class="sec">문항별 분석 <select id="qSubj">${S.config.subjects.map((x) => `<option value="${x.id}" ${x.id === qSubj ? 'selected' : ''}>${x.name}</option>`).join('')}</select>
 <button data-act="sort">${qSort ? '번호순으로' : '오답률순으로'}</button></h3>
-<table><tr><th>번호</th><th>유형</th><th>배점</th><th>정답</th><th>응시</th><th>정답률</th><th>오답률</th><th>응답 분포</th></tr>${rows}</table>
-<h3>영역별 통계</h3><table><tr><th>영역</th><th>응시</th><th>평균</th><th>표준편차</th><th>최고</th><th>최저</th></tr>${ss}</table>
-<h3>캠프별 총점 평균</h3><table><tr><th>캠프</th><th>인원</th><th>평균</th></tr>${camps}</table>
-<h3>총점 분포</h3><table>${hist}</table>`;
+<table class="ct" ${sv(s)}><tr><th>번호</th><th>유형</th><th>배점</th><th>정답</th><th>응시</th><th>정답률</th><th>오답률</th><th>응답 분포</th></tr>${rows}</table>
+<h3 class="sec">영역별 통계</h3><table><tr><th>영역</th><th>응시</th><th>평균</th><th>표준편차</th><th>최고</th><th>최저</th></tr>${ss}</table>
+<h3 class="sec">캠프별 총점 평균</h3><table><tr><th>캠프</th><th>인원</th><th>평균</th></tr>${camps}</table>
+<h3 class="sec">총점 분포</h3><table>${hist}</table>`;
 }
 
 document.addEventListener('dragover', (e) => e.preventDefault());
@@ -288,7 +294,7 @@ ${cols.map((s) => `<td>${r.res.subjects[s.id].taken ? '✓' : ''}</td>`).join(''
 <td><button data-act="del" data-name="${esc(r.name)}">삭제</button></td></tr>`).join('');
   const als = Object.entries(S.alias || {});
   return guide('⑥ 응시자 이름을 관리하세요.', '같은 사람이 이름을 여러 개로 냈다면 아래 칸에 `틀린이름=대표이름` 으로 적어 합칩니다. 캠프는 표에서 직접 고칠 수 있습니다.')
-    + `<h3>이름 병합</h3>
+    + `<h3 class="sec">이름 병합</h3>
 <textarea id="mergeText" rows="4" cols="40" placeholder="한 줄에 하나씩&#10;빡통=김빡통&#10;김봉팔님=김봉팔"></textarea><br>
 <button data-act="merge">병합</button>
 <details class="help" data-k="h-admin"><summary>병합 규칙</summary><ul><li><code>A=B</code> 는 A의 답안을 B로 옮기고 A는 없앱니다. B가 없는 이름이면 이름 변경이 됩니다.</li>
@@ -297,7 +303,7 @@ ${cols.map((s) => `<td>${r.res.subjects[s.id].taken ? '✓' : ''}</td>`).join(''
 ${als.length ? `<p class="mut">병합해 둔 이름: ${als.map(([k, v]) => `${esc(k)} → ${esc(v)}`).join(' · ')}</p>` : ''}
 <h3>총 응시자 ${st.rows.length}명</h3>
 <p><input id="adminQ" placeholder="이름 검색"></p>
-<table id="adminTable"><tr><th>이름</th><th>캠프</th>${cols.map((s) => `<th>${s.name}</th>`).join('')}<th>비고</th><th></th></tr>${rows}</table>`;
+<table id="adminTable"><tr><th>이름</th><th>캠프</th>${cols.map((s) => `<th class="sh" ${sv(s)}>${s.name}</th>`).join('')}<th>비고</th><th></th></tr>${rows}</table>`;
 }
 document.addEventListener('input', (e) => {
   if (e.target.id !== 'adminQ') return;
@@ -337,17 +343,9 @@ const ACT = {
   wrong: (d) => mark(d, 'wrong'),
   accept: (d) => mark(d, 'ans'),
   sort: () => { qSort = !qSort; render(); },
-  exportXlsx: () => {
-    const st = stats(), wb = XLSX.utils.book_new();
-    const rep = [...st.rows].sort((a, b) => (a.res.rank ?? 1e9) - (b.res.rank ?? 1e9)).map((r) => {
-      const o = { 이름: r.name, 캠프: r.res.camp || '' };
-      for (const s of S.config.subjects) { const x = r.res.subjects[s.id]; if (x.taken) { o[s.name] = x.score; o[s.name + ' 표준점수'] = +f1(x.std); o[s.name + ' 백분위'] = +f1(x.pct); o[s.name + ' 등급'] = x.grade; } }
-      return { ...o, 총점: r.res.total, 순위: r.res.rank ?? '', 백분위: r.res.pct == null ? '' : +f1(r.res.pct), 경고: r.res.flags.join(' / ') };
-    });
-    const qrows = S.config.subjects.flatMap((s) => s.questions.map((q) => { const v = st.questions[s.id][q.n]; return { 영역: s.name, 번호: q.n, 유형: TYPES[q.type], 배점: q.pts, 정답: q.ans, 응시: v.att, 정답률: +((1 - v.wrongRate) * 100).toFixed(1), 오답률: +(v.wrongRate * 100).toFixed(1) }; }));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rep), '성적표');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(qrows), '문항분석');
-    XLSX.writeFile(wb, '에바수능_결과.xlsx');
+  exportXlsx: async () => { // 영역별 색상 엑셀 (docs/export.js)
+    const wb = buildReport(ExcelJS, { cfg: S.config, st: stats(), TYPES, date: new Date().toLocaleString('ko-KR') });
+    download('에바수능_결과.xlsx', new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   },
 };
 render(); netBadge(); sync(true);
