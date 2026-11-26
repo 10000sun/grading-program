@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { onRequest } from '../functions/api/[[route]].js';
 const env = { DB: createRequire(import.meta.url)('./d1shim.js')() };
-const root = path.resolve(import.meta.dirname, '..');
+const root = path.resolve(import.meta.dirname, '..', 'public');
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
 http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
