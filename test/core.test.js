@@ -71,6 +71,9 @@ assert.deepEqual([forced.camp, forced.campForced, forced.flags.length, forced.su
 assert.equal(C.scoreStudent(cfg, { ...two, camp: '여백' }).subjects.camp.score, 4); // 여백 범위(1~5)에는 6번이 없음: 16번만 정답
 assert.equal(C.analyze(cfg, { C: two }, {}, { C: '악동' }).rows[0].res.camp, '악동');
 assert.equal(C.scoreStudent(cfg, { ...two, camp: '없는캠프' }).camp, auto.camp); // 알 수 없는 캠프는 무시하고 자동 판별
+// 캠프 영역을 안 푼 사람도 수동 지정하면 캠프별 집계에 들어감
+const noCamp = C.analyze(cfg, { D: { answers: { history: { 1: '3' } } } }, {}, { D: '여백' });
+assert.deepEqual([noCamp.rows[0].res.camp, Object.keys(noCamp.camps)], ['여백', ['여백']]);
 console.log('ok');
 
 // 기본 설정 점검: 서술 외에는 정답이 모두 있고 형식이 맞아야 함
