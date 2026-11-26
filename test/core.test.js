@@ -21,6 +21,10 @@ assert.equal(C.grade(sub('content').questions[7], '③, ①').ok, true);
 assert.equal(C.grade(sub('content').questions[7], '1').ok, false);
 assert.equal(C.grade(sub('history').questions[27], ' manhae ').ok, true);
 
+// 반만 인정: 정답이 아니어도 half 표기와 같으면 배점의 절반
+const sq = sub('history').questions[27]; sq.half = '카모 비슷';
+assert.deepEqual([C.grade(sq, '카모비슷').pts, C.grade(sq, '카모비슷').ok, C.grade(sq, 'Manhae').pts, C.grade(sq, '다른답').pts], [sq.pts / 2, false, sq.pts, 0]);
+
 // 서술형: 수동 점수 전엔 pending
 const essay = sub('history').questions[25];
 assert.equal(C.grade(essay, '답').pending, true);

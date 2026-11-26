@@ -18,7 +18,11 @@
     if (!blank(raw)) {
       if (q.type === 'mc') ok = !!q.ans && normMc(raw) === normMc(q.ans);
       else if (q.type === 'multi') ok = !!q.ans && normMulti(raw) === normMulti(q.ans);
-      else ok = String(q.ans || '').split(',').map(normShort).filter(Boolean).includes(normShort(raw));
+      else {
+        const has = (list) => String(list || '').split(',').map(normShort).filter(Boolean).includes(normShort(raw));
+        ok = has(q.ans);
+        if (!ok && has(q.half)) return { ok: false, pts: q.pts / 2, pending: false, half: true }; // 반만 인정 표기
+      }
     }
     return { ok, pts: ok ? q.pts : 0, pending: false };
   }
@@ -100,7 +104,7 @@
           if (d.ok) right++;
           const key = blank(d.raw) ? '무응답' : q.type === 'mc' ? normMc(d.raw) || String(d.raw).trim()
             : q.type === 'multi' ? normMulti(d.raw) || String(d.raw).trim() : normShort(d.raw) || '무응답';
-          (dist[key] ||= { raw: String(d.raw ?? '').trim(), count: 0, ok: d.ok }).count++;
+          (dist[key] ||= { raw: String(d.raw ?? '').trim(), count: 0, ok: d.ok, half: d.half }).count++;
         }
         qs[q.n] = { att: att.length, right, wrongRate: att.length ? 1 - right / att.length : 0, dist };
       }
