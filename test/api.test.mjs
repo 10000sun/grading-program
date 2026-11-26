@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 import { createRequire } from 'node:module';
-import { onRequest } from '../functions/api/[[route]].js';
+import { onRequest } from '../src/api.js';
 const env = { DB: createRequire(import.meta.url)('./d1shim.js')() };
 const call = async (method, route, body) => {
   const r = await onRequest({ request: new Request('http://x/api/' + route, { method, body: body && JSON.stringify(body) }), env, params: { route: [route] } });

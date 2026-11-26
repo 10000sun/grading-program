@@ -11,7 +11,7 @@
 
 `⚠ 서버 연결 없음`이면 이 브라우저에만 저장됩니다(GitHub Pages, 파일 열기 등).
 
-사이트 파일은 `public/`, API는 `src/worker.js` → `functions/api/[[route]].js`입니다.
+사이트 파일은 `public/`, API는 `src/worker.js` → `src/api.js`입니다.
 
 ## 로컬 개발
 ```bash
