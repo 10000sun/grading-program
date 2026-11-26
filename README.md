@@ -11,7 +11,7 @@
 
 `⚠ 서버 연결 없음`이면 이 브라우저에만 저장됩니다(GitHub Pages, 파일 열기 등).
 
-사이트 파일은 `public/`, API는 `src/worker.js` → `src/api.js`입니다.
+사이트 파일은 `docs/`, API는 `src/worker.js` → `src/api.js`입니다.
 
 ## 로컬 개발
 ```bash
@@ -22,3 +22,7 @@ node test/core.test.js && node test/api.test.mjs
 ## 주의
 - 쓰기 인증이 없어서 접속자 누구나 응시자 데이터와 정답 설정을 바꾸거나 지울 수 있습니다.
 - Functions 무료 한도는 하루 10만 요청입니다. 화면이 열려 있으면 30초마다 버전 확인 요청을 보냅니다.
+
+## github.io에서도 같은 데이터 쓰기
+`docs/` 폴더는 GitHub Pages(Settings → Pages → Source: `main` / `/docs`)로도 그대로 배포할 수 있습니다.
+`docs/app.js`의 `API_BASE`를 실제 workers.dev 주소로 바꿔 두면 github.io에서 열어도 Cloudflare 서버의 같은 데이터를 봅니다.

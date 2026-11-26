@@ -1,6 +1,8 @@
 // D1 기반 API (src/worker.js가 /api/* 요청에 사용). 로그인 없음: 누구나 읽기/쓰기. 바인딩 이름은 DB.
 // shortcut: 쓰기 인증이 없어 누구나 삭제/덮어쓰기 가능, 필요해지면 ADMIN_TOKEN 헤더 검사를 op 앞에 추가.
-const J = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+// CORS 전체 허용: GitHub Pages(github.io) 사이트에서도 이 API를 쓰도록 함
+const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type' };
+const J = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...CORS } });
 const bad = (m) => Object.assign(new Error(m), { status: 400 });
 
 let ready;
@@ -58,6 +60,7 @@ async function apply(db, op) {
 }
 
 export async function onRequest({ request, env, params }) {
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (!env.DB) return J({ error: 'D1 바인딩 DB가 없습니다' }, 500);
   try {
     await init(env.DB);

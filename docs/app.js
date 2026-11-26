@@ -13,7 +13,9 @@ const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch
 
 // ---------- 서버 동기화 (Cloudflare Pages Functions + D1). 서버가 없으면 이 브라우저에만 저장 ----------
 let online = false;
-const api = (path, body) => fetch('api/' + path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : undefined)
+// github.io에서 열면 Cloudflare 서버 주소의 API를 사용 (같은 데이터 공유). 배포 후 실제 workers.dev 주소로 바꿀 것.
+const API_BASE = /github\.io$/.test(location.hostname) ? 'https://grading-program.REPLACE-ME.workers.dev/' : '';
+const api = (path, body) => fetch(API_BASE + 'api/' + path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : undefined)
   .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
 const typing = () => { const a = document.activeElement; return a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.type !== 'file'; };
 const netBadge = () => { $('#total').textContent = `총 응시자 ${Object.keys(S.students).length}명`; $('#net').textContent = online ? '🟢 서버 연동 (모두 같은 화면)' : '⚠ 서버 연결 없음: 이 브라우저에만 저장'; };
