@@ -6,7 +6,7 @@ const own = (o, k) => Object.hasOwn(o || {}, k);
 const safe = (n) => (n in {} ? n + '_' : n); // 'constructor', '__proto__' 같은 이름은 객체 키로 쓰면 깨지므로 변형
 const f1 = (x) => (Math.round(x * 10) / 10).toFixed(1);
 
-let S = load(), tab = 'setup', log = [], sel = '', qSubj = 'history', qSort = false, showStd = false;
+let S = load(), tab = 'setup', log = [], sel = '', qSubj = 'history', qSort = false, showStd = false, rSubj = 'history';
 function load() {
   try { const j = JSON.parse(localStorage.getItem(KEY)); if (j?.config) { if (j.config.version !== DEFAULT_CONFIG.version) j.config = structuredClone(DEFAULT_CONFIG); return j; } } catch {}
   return { config: structuredClone(DEFAULT_CONFIG), students: {}, manual: {}, alias: {}, campOf: {} };
@@ -96,6 +96,7 @@ document.addEventListener('change', (e) => {
     S.config = cfg; await op({ type: 'setConfig', config: cfg }); render();
   });
   else if (e.target.id === 'selStudent') { sel = e.target.value; render(); }
+  else if (e.target.id === 'subjSel') { rSubj = e.target.value; render(); }
   else if (e.target.id === 'showStd') { showStd = e.target.checked; render(); }
   else if (e.target.id === 'qSubj') { qSubj = e.target.value; render(); }
 });
@@ -223,9 +224,21 @@ ${sels.map((s) => `<td>${r.res.subjects[s.id].taken ? r.res.subjects[s.id].score
   return guide('④ 채점 결과입니다.', '총점 = 공통 3영역 합. 아래에서 이름을 고르면 문항별 정오표가 나옵니다.')
     + `<p><button data-act="exportXlsx">엑셀로 내보내기</button> <label><input type="checkbox" id="showStd" ${showStd ? 'checked' : ''}> 표준점수·백분위·등급도 보기</label></p>
 <table>${head}${rows}</table>
+${subjectReport(st)}
 <p>개인 상세: <select id="selStudent"><option value="">이름 선택</option>${st.rows.map((r) => `<option ${r.name === sel ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></p>
 ${who ? S.config.subjects.map((s) => { const o = who.res.subjects[s.id]; if (!o.taken) return ''; return `<details open><summary>${s.name} ${o.score}/${o.max}</summary><table><tr>${Object.keys(o.detail).map((n) => `<th>${n}</th>`).join('')}</tr>
 <tr>${Object.values(o.detail).map((d) => `<td class="${d.pending ? 'mut' : d.ok ? 'ok' : d.pts ? '' : 'bad'}">${d.pending ? '…' : d.pts}</td>`).join('')}</tr></table></details>`; }).join('') : ''}`;
+}
+
+// 영역별 성적: 영역을 고르면 그 영역 응시자의 순위·원점수·표준점수·백분위·등급을 따로 보여줌 (선택영역 포함)
+function subjectReport(st) {
+  const s = subj(rSubj) || S.config.subjects[0], v = st.subjects[s.id];
+  const takers = st.rows.filter((r) => r.res.subjects[s.id].taken).sort((a, b) => a.res.subjects[s.id].rank - b.res.subjects[s.id].rank || a.name.localeCompare(b.name, 'ko'));
+  const grades = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((g) => `${g}등급 ${takers.filter((r) => r.res.subjects[s.id].grade === g).length}명`).join(' · ');
+  const rows = takers.map((r) => { const o = r.res.subjects[s.id]; return `<tr><td>${o.rank}</td><td class="l">${esc(r.name)}</td>${s.camps ? `<td>${r.res.camp || '-'}</td>` : ''}<td><b>${o.score}</b> / ${o.max}</td><td>${f1(o.std)}</td><td>${f1(o.pct)}</td><td>${o.grade}</td><td class="bad">${o.pending ? `미채점 ${o.pending}` : ''}</td></tr>`; }).join('');
+  return `<h3>영역별 성적 <select id="subjSel">${S.config.subjects.map((x) => `<option value="${x.id}" ${x.id === s.id ? 'selected' : ''}>${x.name}${x.group === 'select' ? ' (선택)' : ''}</option>`).join('')}</select></h3>
+<p class="mut">응시 ${v.n}명 · 평균 ${f1(v.mean)} · 표준편차 ${f1(v.sd)} · 최고 ${v.max} · 최저 ${v.min}<br>${grades}</p>
+${takers.length ? `<table><tr><th>순위</th><th>이름</th>${s.camps ? '<th>캠프</th>' : ''}<th>원점수</th><th>표준점수</th><th>백분위</th><th>등급</th><th>비고</th></tr>${rows}</table>` : '<p class="mut">이 영역 응시자가 없습니다.</p>'}`;
 }
 
 // ---------- 5. 문항 분석 ----------

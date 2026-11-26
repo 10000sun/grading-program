@@ -49,6 +49,7 @@ assert.equal(stats.rows.length, 2);
 const a = stats.rows.find((x) => x.name === 'A').res, b = stats.rows.find((x) => x.name === 'B').res;
 assert.equal(a.total, 8); assert.equal(b.total, 6);
 assert.equal(a.rank, 1); assert.equal(b.rank, 2);
+assert.deepEqual([a.subjects.camp.rank, b.subjects.camp.rank], [1, 2]); // 영역 내 순위
 assert.equal(a.pct, 75); assert.equal(b.pct, 25);
 assert.equal(stats.questions.camp[6].wrongRate, 0.5);
 assert.deepEqual(Object.keys(C.analyze(cfg, { 역사만: { answers: { history: { 1: '3' } } }, ...{ A: st } }, {}).camps), ['나래']); // 캠프를 안 푼 사람은 캠프별 집계에서 제외
