@@ -35,20 +35,56 @@ async function state(db) {
   return { config: cfg ? JSON.parse(cfg) : null, students, manual, alias, campOf, ver: v };
 }
 
-const okName = (s) => typeof s === 'string' && s.length > 0 && s.length <= 60;
+const okName = (s) => typeof s === 'string' && s.length > 0 && s.length <= 60 && !(s in {}); // __proto__, constructor 같은 이름은 객체 키로 쓰면 깨지므로 거부
 const okSubj = (s) => typeof s === 'string' && /^[a-z]{1,20}$/.test(s);
+
+// 정답 설정 검증: 화면에 그대로 출력되는 문자열에 HTML 특수문자가 못 들어가게 하고, 클라이언트가 가정하는 구조(문항 번호 = 순서)를 강제
+const SAFE = /^[^<>"'&\\]{1,40}$/, TYPES = ['mc', 'multi', 'short', 'essay'];
+const pair = (p) => Array.isArray(p) && p.length === 2 && p.every(Number.isInteger);
+const longest = (q, k) => q[k] == null || (typeof q[k] === 'string' && q[k].length <= 2000);
+function validConfig(c) {
+  if (!Array.isArray(c?.subjects) || c.subjects.length > 20 || !Number.isFinite(c.version)) return false;
+  return c.subjects.every((s) => s && okSubj(s.id) && SAFE.test(s.name) && (s.group === 'common' || s.group === 'select')
+    && Array.isArray(s.alias) && s.alias.length <= 10 && s.alias.every((a) => typeof a === 'string' && SAFE.test(a))
+    && Array.isArray(s.questions) && s.questions.length <= 200
+    && s.questions.every((q, i) => q && q.n === i + 1 && TYPES.includes(q.type) && typeof q.pts === 'number' && q.pts >= 0 && q.pts <= 100 && ['ans', 'half', 'wrong'].every((k) => longest(q, k)))
+    && (!s.camps || (Object.keys(s.camps).length <= 10 && Object.entries(s.camps).every(([k, v]) => SAFE.test(k) && pair(v)) && pair(s.common))));
+}
+
+// 정답 설정 일부만 바꾸는 연산(setQ/appendQ): 현재 값을 읽어 고친 뒤 "읽은 값 그대로일 때만" 저장(CAS). 두 사람이 동시에 다른 문항을 고쳐도 서로 덮어쓰지 않음
+async function mutateConfig(db, fn) {
+  for (let i = 0; i < 5; i++) {
+    const cur = await db.prepare("SELECT v FROM meta WHERE k='config'").first('v');
+    if (!cur) throw bad('config 없음');
+    const cfg = JSON.parse(cur);
+    fn(cfg);
+    if (!validConfig(cfg)) throw bad('config');
+    const [r] = await db.batch([db.prepare("UPDATE meta SET v = ? WHERE k = 'config' AND v = ?").bind(JSON.stringify(cfg), cur), bump(db)]);
+    if (r.meta.changes) return;
+  }
+  throw Object.assign(new Error('동시 수정이 많아 저장하지 못했습니다'), { status: 409 });
+}
+const findQ = (cfg, op) => { const q = cfg.subjects.find((s) => s.id === op.subject)?.questions[op.n - 1]; if (!q) throw bad('question'); return q; };
 
 async function apply(db, op) {
   const st = [];
   if (op?.type === 'setConfig') {
     const s = JSON.stringify(op.config);
-    if (!Array.isArray(op.config?.subjects) || s.length > 300000) throw bad('config');
+    if (!validConfig(op.config) || s.length > 300000) throw bad('config');
     st.push(db.prepare("INSERT INTO meta (k, v) VALUES ('config', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(s));
+  } else if (op?.type === 'setQ') { // 문항 하나의 항목 하나만 변경
+    if (!['type', 'pts', 'ans', 'half', 'wrong'].includes(op.field) || !Number.isInteger(op.n)) throw bad('setQ');
+    await mutateConfig(db, (cfg) => { findQ(cfg, op)[op.field] = op.value; }); // 값 형식은 validConfig가 검사
+    return ver(db);
+  } else if (op?.type === 'appendQ') { // 정답/반만/오답 표기 목록에 표기 하나 추가
+    if (!['ans', 'half', 'wrong'].includes(op.field) || !Number.isInteger(op.n) || typeof op.raw !== 'string' || !op.raw || op.raw.length > 200) throw bad('appendQ');
+    await mutateConfig(db, (cfg) => { const q = findQ(cfg, op); q[op.field] = q[op.field] ? `${q[op.field]},${op.raw}` : op.raw; });
+    return ver(db);
   } else if (op?.type === 'putAnswers') {
     if (!Array.isArray(op.rows) || op.rows.length > 50) throw bad('rows');
     for (const r of op.rows) {
       const s = JSON.stringify(r?.answers);
-      if (!okName(r?.name) || !okSubj(r?.subject) || !r.answers || typeof r.answers !== 'object' || s.length > 20000) throw bad('row');
+      if (!okName(r?.name) || !okSubj(r?.subject) || !r.answers || typeof r.answers !== 'object' || s.length > 60000) throw bad('row');
       st.push(db.prepare('INSERT INTO answers (name, subject, data) VALUES (?, ?, ?) ON CONFLICT(name, subject) DO UPDATE SET data = excluded.data').bind(r.name, r.subject, s));
     }
   } else if (op?.type === 'setManual') {
@@ -93,6 +129,7 @@ export async function onRequest({ request, env, params }) {
     if (request.method === 'GET' && route === 'version') return J({ v: await ver(env.DB) });
     if (request.method === 'GET' && route === 'state') return J(await state(env.DB));
     if (request.method === 'POST' && route === 'op') {
+      if (Number(request.headers.get('content-length')) > 1e6) return J({ error: 'too large' }, 413);
       const text = await request.text();
       if (text.length > 1e6) return J({ error: 'too large' }, 413);
       let op; try { op = JSON.parse(text); } catch { throw bad('json'); }
