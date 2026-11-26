@@ -37,6 +37,21 @@ for (const op of [{ type: 'nope' }, { type: 'putAnswers', rows: [{ name: '', sub
   { type: 'setManual', name: 'a', subject: 'art', n: 1, pts: 999 }, { type: 'setConfig', config: {} }]) assert.equal((await call('POST', 'op', op))[0], 400);
 assert.equal((await call('GET', 'version'))[1].v, v0);
 assert.equal((await call('GET', 'nope'))[0], 404);
+// 병합: core.mergeInto와 같은 결과여야 함
+await call('POST', 'op', { type: 'putAnswers', rows: [{ name: '빡통', subject: 'art', answers: { 1: 'a' } }, { name: '빡통', subject: 'history', answers: { 1: 'x' } }, { name: '김빡통', subject: 'history', answers: { 1: 'y' } }, { name: '옛', subject: 'art', answers: { 1: 'z' } }] });
+await call('POST', 'op', { type: 'setManual', name: '빡통', subject: 'art', n: 12, pts: 3 });
+await call('POST', 'op', { type: 'setManual', name: '빡통', subject: 'history', n: 26, pts: 1 });
+await call('POST', 'op', { type: 'merge', from: '옛', to: '빡통' }); // 옛 → 빡통 (art 겹침: 빡통 유지)
+await call('POST', 'op', { type: 'merge', from: '빡통', to: '김빡통' });
+const [, m] = await call('GET', 'state');
+assert.deepEqual(Object.keys(m.students), ['김빡통']);
+assert.deepEqual(m.students['김빡통'].answers, { history: { 1: 'y' }, art: { 1: 'a' } });
+assert.deepEqual(m.manual, { 김빡통: { art: { 12: 3 } } });
+assert.deepEqual(m.alias, { 옛: '김빡통', 빡통: '김빡통' });
+assert.equal((await call('POST', 'op', { type: 'merge', from: 'a', to: 'a' }))[0], 400);
+await call('POST', 'op', { type: 'clearAll' });
+assert.deepEqual((await call('GET', 'state'))[1].alias, {});
+
 const pre = await onRequest({ request: new Request('http://x/api/op', { method: 'OPTIONS' }), env, params: { route: ['op'] } });
 assert.equal(pre.status, 204);
 assert.equal(pre.headers.get('access-control-allow-origin'), '*');

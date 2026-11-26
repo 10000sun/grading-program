@@ -7,7 +7,7 @@ const f1 = (x) => (Math.round(x * 10) / 10).toFixed(1);
 let S = load(), tab = 'setup', log = [], sel = '', qSubj = 'history', qSort = false, showStd = false;
 function load() {
   try { const j = JSON.parse(localStorage.getItem(KEY)); if (j?.config) { if (j.config.version !== DEFAULT_CONFIG.version) j.config = structuredClone(DEFAULT_CONFIG); return j; } } catch {}
-  return { config: structuredClone(DEFAULT_CONFIG), students: {}, manual: {} };
+  return { config: structuredClone(DEFAULT_CONFIG), students: {}, manual: {}, alias: {} };
 }
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {} };
 
@@ -30,7 +30,7 @@ async function sync(force) {
       j.config = structuredClone(DEFAULT_CONFIG);
       api('op', { type: 'setConfig', config: j.config }).then((r) => (S.ver = r.v)).catch(() => {});
     }
-    Object.assign(S, { config: j.config, students: j.students, manual: j.manual, ver: j.ver });
+    Object.assign(S, { config: j.config, students: j.students, manual: j.manual, alias: j.alias || {}, ver: j.ver });
     save(); if (tab !== 'setup') render(); // 정답 세팅 탭은 펼침 상태를 지키려고 다시 그리지 않음
   } catch { online = false; }
   netBadge();
@@ -45,10 +45,10 @@ const download = (name, blob) => { const a = document.createElement('a'); a.href
 const stats = () => Core.analyze(S.config, S.students, S.manual);
 
 // ---------- 탭 ----------
-const TABS = [['setup', '1. 정답 세팅'], ['import', '2. 답안 업로드'], ['manual', '3. 수동 채점'], ['report', '4. 성적표'], ['items', '5. 문항 분석']];
+const TABS = [['setup', '1. 정답 세팅'], ['import', '2. 답안 업로드'], ['manual', '3. 수동 채점'], ['report', '4. 성적표'], ['items', '5. 문항 분석'], ['admin', '6. 응시자 관리']];
 function render() {
   $('#nav').innerHTML = TABS.map(([k, v]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${v}</button>`).join('');
-  $('#main').innerHTML = { setup, import: importTab, manual, report, items }[tab]();
+  $('#main').innerHTML = { setup, import: importTab, manual, report, items, admin }[tab]();
   netBadge();
 }
 document.addEventListener('click', (e) => {
@@ -123,7 +123,7 @@ async function importFiles(files) {
       if (!form.s) { log.push(`${f.name}: 영역을 인식하지 못했습니다 (아래 "영역 직접 지정" 사용)`); continue; }
       const seen = {}; let dup = 0;
       for (const r of form.rows) { // 같은 이름이 여러 번 제출되면 마지막(최신) 응답 사용
-        const name = String(r[form.ni]).trim().replace(/\s+/g, ' ').slice(0, 60);
+        const raw = String(r[form.ni]).trim().replace(/\s+/g, ' ').slice(0, 60), name = S.alias?.[raw] || raw; // 병합해 둔 이름은 대표 이름으로
         if (seen[name]) dup++; seen[name] = 1;
         const answers = Object.fromEntries(form.qs.map((q) => [q.n, r[q.i]]));
         ((S.students[name] ||= { answers: {} }).answers)[form.s.id] = answers;
@@ -222,11 +222,59 @@ function mark(d, field) {
   op({ type: 'setConfig', config: S.config }); render();
 }
 
+// ---------- 6. 응시자 관리 ----------
+const dupKey = (n) => n.replace(/[\s님]/g, '').toLowerCase();
+function admin() {
+  const st = stats(), cols = S.config.subjects.filter((s) => s.group === 'common' || st.subjects[s.id].n > 0);
+  const keys = {}; st.rows.forEach((r) => (keys[dupKey(r.name)] = (keys[dupKey(r.name)] || 0) + 1));
+  const rows = [...st.rows].sort((a, b) => a.name.localeCompare(b.name, 'ko')).map((r) => `<tr data-n="${esc(r.name)}"><td class="l">${esc(r.name)}</td><td>${r.res.camp || '-'}</td>
+${cols.map((s) => `<td>${r.res.subjects[s.id].taken ? '✓' : ''}</td>`).join('')}
+<td class="bad l">${keys[dupKey(r.name)] > 1 ? '<span class="badge">같은 사람?</span> ' : ''}${esc(r.res.flags.join(' / '))}</td>
+<td><button data-act="del" data-name="${esc(r.name)}">삭제</button></td></tr>`).join('');
+  const als = Object.entries(S.alias || {});
+  return guide('⑥ 응시자 이름을 관리하세요.', '같은 사람이 이름을 여러 개로 냈다면 아래 칸에 `틀린이름=대표이름` 으로 적어 합칩니다.')
+    + `<h3>이름 병합</h3>
+<textarea id="mergeText" rows="4" cols="40" placeholder="한 줄에 하나씩&#10;빡통=김빡통&#10;김봉팔님=김봉팔"></textarea><br>
+<button data-act="merge">병합</button>
+<details class="help"><summary>병합 규칙</summary><ul><li><code>A=B</code> 는 A의 답안을 B로 옮기고 A는 없앱니다. B가 없는 이름이면 이름 변경이 됩니다.</li>
+<li>같은 영역 답안이 A와 B 양쪽에 있으면 B의 것을 쓰고 A의 것은 버립니다.</li>
+<li>병합한 이름은 기억해 두어서, 나중에 A 이름으로 엑셀을 다시 올려도 자동으로 B가 됩니다.</li></ul></details>
+${als.length ? `<p class="mut">병합해 둔 이름: ${als.map(([k, v]) => `${esc(k)} → ${esc(v)}`).join(' · ')}</p>` : ''}
+<h3>총 응시자 ${st.rows.length}명</h3>
+<p><input id="adminQ" placeholder="이름 검색"></p>
+<table id="adminTable"><tr><th>이름</th><th>캠프</th>${cols.map((s) => `<th>${s.name}</th>`).join('')}<th>비고</th><th></th></tr>${rows}</table>`;
+}
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'adminQ') return;
+  document.querySelectorAll('#adminTable tr[data-n]').forEach((tr) => (tr.hidden = !tr.dataset.n.includes(e.target.value.trim())));
+});
+
 // ---------- 동작 ----------
 const ACT = {
   cfgSave: () => download('정답설정.json', new Blob([JSON.stringify(S.config, null, 1)], { type: 'application/json' })),
   del: (d) => { delete S.students[d.name]; delete S.manual[d.name]; op({ type: 'delStudent', name: d.name }); render(); },
-  clearAll: () => { if (confirm('응시자 데이터를 모두 삭제할까요?')) { S.students = {}; S.manual = {}; op({ type: 'clearAll' }); render(); } },
+  clearAll: () => { if (confirm('응시자 데이터를 모두 삭제할까요?')) { S.students = {}; S.manual = {}; S.alias = {}; op({ type: 'clearAll' }); render(); } },
+  merge: async () => {
+    const pairs = [];
+    for (const line of $('#mergeText').value.split('\n')) {
+      const i = line.indexOf('=');
+      if (i < 0) continue;
+      const from = line.slice(0, i).trim().replace(/\s+/g, ' '), to0 = line.slice(i + 1).trim().replace(/\s+/g, ' ');
+      if (from && to0 && from !== to0 && from.length <= 60 && to0.length <= 60) pairs.push([from, to0]);
+    }
+    if (!pairs.length) return alert('병합할 줄이 없습니다. 예) 빡통=김빡통');
+    const lines = pairs.map(([f, t]) => {
+      const lost = Object.keys(S.students[f]?.answers || {}).filter((sid) => S.students[S.alias?.[t] || t]?.answers?.[sid]).map((sid) => subj(sid)?.name);
+      return `${f} → ${t}${S.students[f] ? '' : ' (현재 없는 이름: 별칭만 등록)'}${lost.length ? ` [${lost.join(', ')} 답안은 ${t}의 것 유지]` : ''}`;
+    });
+    if (!confirm(`${pairs.length}건을 병합할까요?\n\n${lines.join('\n')}`)) return;
+    for (const [from, to0] of pairs) { // 순서대로 하나씩 (앞 줄 병합 결과가 뒷 줄의 대표 이름에 반영되도록)
+      const to = S.alias?.[to0] || to0;
+      if (from === to) continue;
+      Core.mergeInto(S, from, to); await op({ type: 'merge', from, to });
+    }
+    render();
+  },
   half: (d) => mark(d, 'half'),
   wrong: (d) => mark(d, 'wrong'),
   accept: (d) => mark(d, 'ans'),
