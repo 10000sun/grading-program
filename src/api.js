@@ -1,4 +1,4 @@
-// Cloudflare Pages Function + D1. 로그인 없음: 누구나 읽기/쓰기. 바인딩 이름은 DB.
+// D1 기반 API (src/worker.js가 /api/* 요청에 사용). 로그인 없음: 누구나 읽기/쓰기. 바인딩 이름은 DB.
 // shortcut: 쓰기 인증이 없어 누구나 삭제/덮어쓰기 가능, 필요해지면 ADMIN_TOKEN 헤더 검사를 op 앞에 추가.
 const J = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 const bad = (m) => Object.assign(new Error(m), { status: 400 });

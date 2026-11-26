@@ -1,0 +1,8 @@
+{
+  "name": "grading-program",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-11-01",
+  "assets": { "directory": "./public", "run_worker_first": ["/api/*"] },
+  // database_id를 생략하면 배포 시 wrangler가 D1을 자동으로 만들어 연결함. 실패하면 대시보드에서 만든 DB의 database_id를 추가.
+  "d1_databases": [{ "binding": "DB", "database_name": "eva-grading" }]
+}
