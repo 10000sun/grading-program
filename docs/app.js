@@ -240,9 +240,8 @@ function admin() {
   const st = stats(), cols = S.config.subjects.filter((s) => s.group === 'common' || st.subjects[s.id].n > 0);
   const keys = {}; st.rows.forEach((r) => (keys[dupKey(r.name)] = (keys[dupKey(r.name)] || 0) + 1));
   const campS = S.config.subjects.find((s) => s.camps);
-  const campCell = (r) => { // 캠프 영역 답안이 있으면 자동 판별 값을 기본으로 보여주고, 직접 고를 수 있게 함
-    const ans = S.students[r.name]?.answers?.[campS.id], cur = S.campOf?.[r.name] || '';
-    if (!ans) return '-';
+  const campCell = (r) => { // 자동 판별 값을 기본으로 보여주고, 직접 고를 수 있게 함
+    const ans = S.students[r.name]?.answers?.[campS.id] || {}, cur = S.campOf?.[r.name] || ''; // 캠프 영역을 안 풀었어도 지정 가능
     return `<select data-camp="${esc(r.name)}"><option value="">자동 (${Core.detectCamp(campS, ans).camp || '판별 불가'})</option>${Object.keys(campS.camps).map((c) => `<option ${c === cur ? 'selected' : ''}>${c}</option>`).join('')}</select>${cur ? ' <span class="badge">수동</span>' : ''}`;
   };
   const rows = [...st.rows].sort((a, b) => a.name.localeCompare(b.name, 'ko')).map((r) => `<tr data-n="${esc(r.name)}"><td class="l">${esc(r.name)}</td><td>${campCell(r)}</td>

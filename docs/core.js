@@ -111,7 +111,7 @@
     }
     const campId = cfg.subjects.find((s) => s.camps)?.id;
     for (const r of rows) {
-      if (!r.res.subjects[campId]?.taken) continue; // 캠프 영역을 푼 사람만 캠프별로 집계
+      if (!r.res.subjects[campId]?.taken && !r.res.campForced) continue; // 캠프 영역을 풀었거나 캠프를 수동 지정한 사람만 캠프별로 집계
       const c = r.res.camp || '미판별';
       (stats.camps[c] ||= { n: 0, sum: 0 });
       stats.camps[c].n++; stats.camps[c].sum += r.res.total;
