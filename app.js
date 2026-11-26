@@ -10,6 +10,34 @@ function load() {
   return { config: structuredClone(DEFAULT_CONFIG), students: {}, manual: {} };
 }
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {} };
+
+// ---------- 서버 동기화 (Cloudflare Pages Functions + D1). 서버가 없으면 이 브라우저에만 저장 ----------
+let online = false;
+const api = (path, body) => fetch('api/' + path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : undefined)
+  .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
+const typing = () => { const a = document.activeElement; return a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.type !== 'file'; };
+const netBadge = () => { $('#total').textContent = `총 응시자 ${Object.keys(S.students).length}명`; $('#net').textContent = online ? '🟢 서버 연동 (모두 같은 화면)' : '⚠ 서버 연결 없음: 이 브라우저에만 저장'; };
+async function sync(force) {
+  try {
+    const { v } = await api('version');
+    if (online && !force && v === S.ver) return;
+    const j = await api('state');
+    if (online && typing()) return; // 입력 중에는 덮어쓰지 않고 다음 주기에 반영
+    online = true;
+    if (!j.config || j.config.version !== DEFAULT_CONFIG.version) { // 서버에 정답 설정이 없거나 구버전이면 기본값으로 초기화
+      j.config = structuredClone(DEFAULT_CONFIG);
+      api('op', { type: 'setConfig', config: j.config }).then((r) => (S.ver = r.v)).catch(() => {});
+    }
+    Object.assign(S, { config: j.config, students: j.students, manual: j.manual, ver: j.ver });
+    save(); if (tab !== 'setup') render(); // 정답 세팅 탭은 펼침 상태를 지키려고 다시 그리지 않음
+  } catch { online = false; }
+  netBadge();
+}
+async function op(body) {
+  save();
+  if (!online) return;
+  try { const { v } = await api('op', body); if (v === S.ver + 1) S.ver = v; else await sync(true); } catch { online = false; netBadge(); }
+}
 const subj = (id) => S.config.subjects.find((s) => s.id === id);
 const download = (name, blob) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); };
 const stats = () => Core.analyze(S.config, S.students, S.manual);
@@ -19,7 +47,7 @@ const TABS = [['setup', '1. 정답 세팅'], ['import', '2. 답안 업로드'], 
 function render() {
   $('#nav').innerHTML = TABS.map(([k, v]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${v}</button>`).join('');
   $('#main').innerHTML = { setup, import: importTab, manual, report, items }[tab]();
-  $('#total').textContent = `총 응시자 ${Object.keys(S.students).length}명`;
+  netBadge();
 }
 document.addEventListener('click', (e) => {
   const t = e.target.closest('[data-tab]'); if (t) { tab = t.dataset.tab; render(); return; }
@@ -30,14 +58,14 @@ document.addEventListener('change', (e) => {
   if (d.f) { // 정답 세팅 입력
     const q = subj(d.s).questions[d.n - 1];
     q[d.f] = d.f === 'pts' ? Number(e.target.value) || 0 : e.target.value;
-    save(); if (d.f === 'type') render();
+    op({ type: 'setConfig', config: S.config }); if (d.f === 'type') render();
   } else if (d.mp) { // 수동 점수
     const [s, n, name] = JSON.parse(d.mp);
     const m = ((S.manual[name] ||= {})[s] ||= {});
     if (e.target.value === '') delete m[n]; else m[n] = Number(e.target.value);
-    save();
+    op({ type: 'setManual', name, subject: s, n, pts: e.target.value === '' ? null : Number(e.target.value) });
   } else if (e.target.id === 'files') importFiles([...e.target.files]);
-  else if (e.target.id === 'cfgfile') e.target.files[0].text().then((t) => { S.config = JSON.parse(t); save(); render(); });
+  else if (e.target.id === 'cfgfile') e.target.files[0].text().then((t) => { S.config = JSON.parse(t); op({ type: 'setConfig', config: S.config }); render(); });
   else if (e.target.id === 'selStudent') { sel = e.target.value; render(); }
   else if (e.target.id === 'showStd') { showStd = e.target.checked; render(); }
   else if (e.target.id === 'qSubj') { qSubj = e.target.value; render(); }
@@ -82,7 +110,7 @@ function readForm(ws, fname, def) {
   return { s, ni, qs, rows: rows.slice(1).filter((r) => String(r[ni]).trim()) };
 }
 async function importFiles(files) {
-  const def = $('#defSubj')?.value;
+  const def = $('#defSubj')?.value, rows = [];
   for (const f of files) {
     try {
       const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
@@ -91,13 +119,16 @@ async function importFiles(files) {
       if (!form.s) { log.push(`${f.name}: 영역을 인식하지 못했습니다 (아래 "영역 직접 지정" 사용)`); continue; }
       const seen = {}; let dup = 0;
       for (const r of form.rows) { // 같은 이름이 여러 번 제출되면 마지막(최신) 응답 사용
-        const name = String(r[form.ni]).trim().replace(/\s+/g, ' ');
+        const name = String(r[form.ni]).trim().replace(/\s+/g, ' ').slice(0, 60);
         if (seen[name]) dup++; seen[name] = 1;
-        ((S.students[name] ||= { answers: {} }).answers)[form.s.id] = Object.fromEntries(form.qs.map((q) => [q.n, r[q.i]]));
+        const answers = Object.fromEntries(form.qs.map((q) => [q.n, r[q.i]]));
+        ((S.students[name] ||= { answers: {} }).answers)[form.s.id] = answers;
+        rows.push({ name, subject: form.s.id, answers });
       }
       log.push(`${f.name}: ${form.s.name} ${Object.keys(seen).length}명 읽음${dup ? ` (중복 제출 ${dup}건은 최신 응답 사용)` : ''}`);
     } catch (err) { log.push(`${f.name}: 오류 ${err.message}`); }
   }
+  for (let i = 0; i < rows.length; i += 50) await op({ type: 'putAnswers', rows: rows.slice(i, i + 50) });
   save(); render();
 }
 function importTab() {
@@ -182,9 +213,9 @@ document.addEventListener('drop', (e) => { e.preventDefault(); if (tab === 'impo
 // ---------- 동작 ----------
 const ACT = {
   cfgSave: () => download('정답설정.json', new Blob([JSON.stringify(S.config, null, 1)], { type: 'application/json' })),
-  del: (d) => { delete S.students[d.name]; save(); render(); },
-  clearAll: () => { if (confirm('응시자 데이터를 모두 삭제할까요?')) { S.students = {}; S.manual = {}; save(); render(); } },
-  accept: (d) => { const q = subj(d.s).questions[d.n - 1]; const raw = d.raw.replace(/,/g, ' '); q.ans = q.ans ? `${q.ans},${raw}` : raw; save(); render(); },
+  del: (d) => { delete S.students[d.name]; delete S.manual[d.name]; op({ type: 'delStudent', name: d.name }); render(); },
+  clearAll: () => { if (confirm('응시자 데이터를 모두 삭제할까요?')) { S.students = {}; S.manual = {}; op({ type: 'clearAll' }); render(); } },
+  accept: (d) => { const q = subj(d.s).questions[d.n - 1]; const raw = d.raw.replace(/,/g, ' '); q.ans = q.ans ? `${q.ans},${raw}` : raw; op({ type: 'setConfig', config: S.config }); render(); },
   sort: () => { qSort = !qSort; render(); },
   exportXlsx: () => {
     const st = stats(), wb = XLSX.utils.book_new();
@@ -199,4 +230,6 @@ const ACT = {
     XLSX.writeFile(wb, '에바수능_결과.xlsx');
   },
 };
-render();
+render(); netBadge(); sync(true);
+setInterval(() => document.visibilityState === 'visible' && sync(), 30000);
+document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && sync());
