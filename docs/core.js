@@ -96,6 +96,7 @@
         o.std = sd ? 100 + (20 * (o.score - mean)) / sd : 100; // 표준점수: 평균 100, 표준편차 20
         o.pct = pctile(sc, o.score);
         o.grade = gradeOf(sc, o.score);
+        o.rank = 1 + sc.filter((x) => x > o.score).length; // 영역 내 순위
       }
       const qs = (stats.questions[s.id] = {});
       for (const q of s.questions) {
