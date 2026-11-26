@@ -7,7 +7,7 @@ const f1 = (x) => (Math.round(x * 10) / 10).toFixed(1);
 let S = load(), tab = 'setup', log = [], sel = '', qSubj = 'history', qSort = false, showStd = false;
 function load() {
   try { const j = JSON.parse(localStorage.getItem(KEY)); if (j?.config) { if (j.config.version !== DEFAULT_CONFIG.version) j.config = structuredClone(DEFAULT_CONFIG); return j; } } catch {}
-  return { config: structuredClone(DEFAULT_CONFIG), students: {}, manual: {}, alias: {} };
+  return { config: structuredClone(DEFAULT_CONFIG), students: {}, manual: {}, alias: {}, campOf: {} };
 }
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {} };
 
@@ -30,7 +30,7 @@ async function sync(force) {
       j.config = structuredClone(DEFAULT_CONFIG);
       api('op', { type: 'setConfig', config: j.config }).then((r) => (S.ver = r.v)).catch(() => {});
     }
-    Object.assign(S, { config: j.config, students: j.students, manual: j.manual, alias: j.alias || {}, ver: j.ver });
+    Object.assign(S, { config: j.config, students: j.students, manual: j.manual, alias: j.alias || {}, campOf: j.campOf || {}, ver: j.ver });
     save(); if (tab !== 'setup') render(); // 정답 세팅 탭은 펼침 상태를 지키려고 다시 그리지 않음
   } catch { online = false; }
   netBadge();
@@ -42,7 +42,7 @@ async function op(body) {
 }
 const subj = (id) => S.config.subjects.find((s) => s.id === id);
 const download = (name, blob) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); };
-const stats = () => Core.analyze(S.config, S.students, S.manual);
+const stats = () => Core.analyze(S.config, S.students, S.manual, S.campOf);
 
 // ---------- 탭 ----------
 const TABS = [['setup', '1. 정답 세팅'], ['import', '2. 답안 업로드'], ['manual', '3. 수동 채점'], ['report', '4. 성적표'], ['items', '5. 문항 분석'], ['admin', '6. 응시자 관리']];
@@ -66,6 +66,10 @@ document.addEventListener('change', (e) => {
     const m = ((S.manual[name] ||= {})[s] ||= {});
     if (e.target.value === '') delete m[n]; else m[n] = Number(e.target.value);
     op({ type: 'setManual', name, subject: s, n, pts: e.target.value === '' ? null : Number(e.target.value) });
+  } else if (d.camp !== undefined) { // 관리 탭: 캠프 수동 지정
+    const v = e.target.value;
+    if (v) (S.campOf ||= {})[d.camp] = v; else delete S.campOf?.[d.camp];
+    op({ type: 'setCamp', name: d.camp, camp: v || null }); render();
   } else if (e.target.id === 'files') importFiles([...e.target.files]);
   else if (e.target.id === 'cfgfile') e.target.files[0].text().then((t) => { S.config = JSON.parse(t); op({ type: 'setConfig', config: S.config }); render(); });
   else if (e.target.id === 'selStudent') { sel = e.target.value; render(); }
@@ -231,12 +235,18 @@ const dupKey = (n) => n.replace(/[\s님]/g, '').toLowerCase();
 function admin() {
   const st = stats(), cols = S.config.subjects.filter((s) => s.group === 'common' || st.subjects[s.id].n > 0);
   const keys = {}; st.rows.forEach((r) => (keys[dupKey(r.name)] = (keys[dupKey(r.name)] || 0) + 1));
-  const rows = [...st.rows].sort((a, b) => a.name.localeCompare(b.name, 'ko')).map((r) => `<tr data-n="${esc(r.name)}"><td class="l">${esc(r.name)}</td><td>${r.res.camp || '-'}</td>
+  const campS = S.config.subjects.find((s) => s.camps);
+  const campCell = (r) => { // 캠프 영역 답안이 있으면 자동 판별 값을 기본으로 보여주고, 직접 고를 수 있게 함
+    const ans = S.students[r.name]?.answers?.[campS.id], cur = S.campOf?.[r.name] || '';
+    if (!ans) return '-';
+    return `<select data-camp="${esc(r.name)}"><option value="">자동 (${Core.detectCamp(campS, ans).camp || '판별 불가'})</option>${Object.keys(campS.camps).map((c) => `<option ${c === cur ? 'selected' : ''}>${c}</option>`).join('')}</select>${cur ? ' <span class="badge">수동</span>' : ''}`;
+  };
+  const rows = [...st.rows].sort((a, b) => a.name.localeCompare(b.name, 'ko')).map((r) => `<tr data-n="${esc(r.name)}"><td class="l">${esc(r.name)}</td><td>${campCell(r)}</td>
 ${cols.map((s) => `<td>${r.res.subjects[s.id].taken ? '✓' : ''}</td>`).join('')}
 <td class="bad l">${keys[dupKey(r.name)] > 1 ? '<span class="badge">같은 사람?</span> ' : ''}${esc(r.res.flags.join(' / '))}</td>
 <td><button data-act="del" data-name="${esc(r.name)}">삭제</button></td></tr>`).join('');
   const als = Object.entries(S.alias || {});
-  return guide('⑥ 응시자 이름을 관리하세요.', '같은 사람이 이름을 여러 개로 냈다면 아래 칸에 `틀린이름=대표이름` 으로 적어 합칩니다.')
+  return guide('⑥ 응시자 이름을 관리하세요.', '같은 사람이 이름을 여러 개로 냈다면 아래 칸에 `틀린이름=대표이름` 으로 적어 합칩니다. 캠프는 표에서 직접 고칠 수 있습니다.')
     + `<h3>이름 병합</h3>
 <textarea id="mergeText" rows="4" cols="40" placeholder="한 줄에 하나씩&#10;빡통=김빡통&#10;김봉팔님=김봉팔"></textarea><br>
 <button data-act="merge">병합</button>
@@ -256,8 +266,8 @@ document.addEventListener('input', (e) => {
 // ---------- 동작 ----------
 const ACT = {
   cfgSave: () => download('정답설정.json', new Blob([JSON.stringify(S.config, null, 1)], { type: 'application/json' })),
-  del: (d) => { delete S.students[d.name]; delete S.manual[d.name]; op({ type: 'delStudent', name: d.name }); render(); },
-  clearAll: () => { if (confirm('응시자 데이터를 모두 삭제할까요?')) { S.students = {}; S.manual = {}; S.alias = {}; op({ type: 'clearAll' }); render(); } },
+  del: (d) => { delete S.students[d.name]; delete S.manual[d.name]; delete S.campOf?.[d.name]; op({ type: 'delStudent', name: d.name }); render(); },
+  clearAll: () => { if (confirm('응시자 데이터를 모두 삭제할까요?')) { S.students = {}; S.manual = {}; S.alias = {}; S.campOf = {}; op({ type: 'clearAll' }); render(); } },
   merge: async () => {
     const pairs = [];
     for (const line of $('#mergeText').value.split('\n')) {

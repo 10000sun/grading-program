@@ -53,9 +53,9 @@
       const ans = (st.answers || {})[s.id] || {};
       let camp = null;
       if (s.camps) {
-        const d = detectCamp(s, ans);
-        camp = out.camp = d.camp;
-        if (d.flag && Object.values(ans).some((v) => !blank(v))) out.flags.push(d.flag);
+        const d = detectCamp(s, ans), forced = s.camps[st.camp] ? st.camp : null; // st.camp: 관리 탭에서 수동 지정한 캠프
+        camp = out.camp = forced || d.camp; out.campForced = !!forced;
+        if (!forced && d.flag && Object.values(ans).some((v) => !blank(v))) out.flags.push(d.flag);
       }
       const qs = scope(s, camp);
       const o = { score: 0, max: 0, pending: 0, detail: {}, taken: qs.some((q) => !blank(ans[q.n])) };
@@ -76,8 +76,8 @@
   const CUTS = [4, 11, 23, 40, 60, 77, 89, 96, 100];
   const gradeOf = (arr, x) => CUTS.findIndex((c) => (arr.filter((v) => v >= x).length / arr.length) * 100 <= c) + 1;
 
-  function analyze(cfg, students, manual) {
-    const rows = Object.entries(students).map(([name, st]) => ({ name, res: scoreStudent(cfg, { ...st, name }, manual) }));
+  function analyze(cfg, students, manual, campOf) {
+    const rows = Object.entries(students).map(([name, st]) => ({ name, res: scoreStudent(cfg, { ...st, name, camp: campOf?.[name] }, manual) }));
     const stats = { rows, subjects: {}, questions: {}, camps: {}, totals: rows.map((r) => r.res.total) };
     for (const r of rows) {
       r.res.rank = 1 + stats.totals.filter((t) => t > r.res.total).length;
@@ -131,6 +131,7 @@
     }
     if (!Object.keys(t.answers).length) delete S.students[to]; // 아무 답안도 없으면 응시자로 만들지 않음 (별칭만 기록)
     delete S.students[from]; delete S.manual[from];
+    if (S.campOf?.[from]) { S.campOf[to] ||= S.campOf[from]; delete S.campOf[from]; } // 수동 캠프는 대표 이름 것을 우선
     for (const k of Object.keys(S.alias)) if (S.alias[k] === from) S.alias[k] = to;
     S.alias[from] = to;
     return dropped;
