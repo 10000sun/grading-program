@@ -1,0 +1,75 @@
+// Cloudflare Pages Function + D1. 로그인 없음: 누구나 읽기/쓰기. 바인딩 이름은 DB.
+// shortcut: 쓰기 인증이 없어 누구나 삭제/덮어쓰기 가능, 필요해지면 ADMIN_TOKEN 헤더 검사를 op 앞에 추가.
+const J = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
+const bad = (m) => Object.assign(new Error(m), { status: 400 });
+
+let ready;
+const init = (db) => (ready ||= db.batch([
+  db.prepare('CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)'),
+  db.prepare('CREATE TABLE IF NOT EXISTS answers (name TEXT, subject TEXT, data TEXT, PRIMARY KEY (name, subject))'),
+  db.prepare('CREATE TABLE IF NOT EXISTS manual (name TEXT, subject TEXT, q INTEGER, pts REAL, PRIMARY KEY (name, subject, q))'),
+]).catch((e) => { ready = null; throw e; }));
+
+const ver = async (db) => Number((await db.prepare("SELECT v FROM meta WHERE k='ver'").first('v')) || 0);
+const bump = (db) => db.prepare("INSERT INTO meta (k, v) VALUES ('ver', '1') ON CONFLICT(k) DO UPDATE SET v = CAST(v AS INTEGER) + 1");
+
+async function state(db) {
+  const [cfg, ans, man, v] = await Promise.all([
+    db.prepare("SELECT v FROM meta WHERE k='config'").first('v'),
+    db.prepare('SELECT name, subject, data FROM answers').all(),
+    db.prepare('SELECT name, subject, q, pts FROM manual').all(),
+    ver(db),
+  ]);
+  const students = {}, manual = {};
+  for (const r of ans.results) ((students[r.name] ||= { answers: {} }).answers)[r.subject] = JSON.parse(r.data);
+  for (const r of man.results) ((manual[r.name] ||= {})[r.subject] ||= {})[r.q] = r.pts;
+  return { config: cfg ? JSON.parse(cfg) : null, students, manual, ver: v };
+}
+
+const okName = (s) => typeof s === 'string' && s.length > 0 && s.length <= 60;
+const okSubj = (s) => typeof s === 'string' && /^[a-z]{1,20}$/.test(s);
+
+async function apply(db, op) {
+  const st = [];
+  if (op?.type === 'setConfig') {
+    const s = JSON.stringify(op.config);
+    if (!Array.isArray(op.config?.subjects) || s.length > 300000) throw bad('config');
+    st.push(db.prepare("INSERT INTO meta (k, v) VALUES ('config', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(s));
+  } else if (op?.type === 'putAnswers') {
+    if (!Array.isArray(op.rows) || op.rows.length > 50) throw bad('rows');
+    for (const r of op.rows) {
+      const s = JSON.stringify(r?.answers);
+      if (!okName(r?.name) || !okSubj(r?.subject) || !r.answers || typeof r.answers !== 'object' || s.length > 20000) throw bad('row');
+      st.push(db.prepare('INSERT INTO answers (name, subject, data) VALUES (?, ?, ?) ON CONFLICT(name, subject) DO UPDATE SET data = excluded.data').bind(r.name, r.subject, s));
+    }
+  } else if (op?.type === 'setManual') {
+    if (!okName(op.name) || !okSubj(op.subject) || !Number.isInteger(op.n)) throw bad('manual');
+    if (op.pts == null) st.push(db.prepare('DELETE FROM manual WHERE name = ? AND subject = ? AND q = ?').bind(op.name, op.subject, op.n));
+    else if (typeof op.pts === 'number' && op.pts >= 0 && op.pts <= 100) st.push(db.prepare('INSERT INTO manual (name, subject, q, pts) VALUES (?, ?, ?, ?) ON CONFLICT(name, subject, q) DO UPDATE SET pts = excluded.pts').bind(op.name, op.subject, op.n, op.pts));
+    else throw bad('pts');
+  } else if (op?.type === 'delStudent') {
+    if (!okName(op.name)) throw bad('name');
+    st.push(db.prepare('DELETE FROM answers WHERE name = ?').bind(op.name), db.prepare('DELETE FROM manual WHERE name = ?').bind(op.name));
+  } else if (op?.type === 'clearAll') {
+    st.push(db.prepare('DELETE FROM answers'), db.prepare('DELETE FROM manual'));
+  } else throw bad('op');
+  await db.batch([...st, bump(db)]);
+  return ver(db);
+}
+
+export async function onRequest({ request, env, params }) {
+  if (!env.DB) return J({ error: 'D1 바인딩 DB가 없습니다' }, 500);
+  try {
+    await init(env.DB);
+    const route = [].concat(params.route || [])[0];
+    if (request.method === 'GET' && route === 'version') return J({ v: await ver(env.DB) });
+    if (request.method === 'GET' && route === 'state') return J(await state(env.DB));
+    if (request.method === 'POST' && route === 'op') {
+      const text = await request.text();
+      if (text.length > 1e6) return J({ error: 'too large' }, 413);
+      let op; try { op = JSON.parse(text); } catch { throw bad('json'); }
+      return J({ v: await apply(env.DB, op) });
+    }
+    return J({ error: 'not found' }, 404);
+  } catch (e) { return J({ error: e.message }, e.status || 500); }
+}
