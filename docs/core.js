@@ -117,6 +117,23 @@
     return stats;
   }
 
-  const Core = { grade, detectCamp, scope, scoreStudent, analyze, normShort, normMulti, blank };
+  // 응시자 병합(from → to): 같은 영역 답안이 양쪽에 있으면 to의 것을 유지하고 from의 것은 버림. 서버 merge 연산과 같은 규칙.
+  function mergeInto(S, from, to) {
+    S.alias ||= {};
+    const a = S.students[from], t = (S.students[to] ||= { answers: {} }), dropped = [];
+    for (const [sid, ans] of Object.entries(a?.answers || {})) (t.answers[sid] ? dropped.push(sid) : (t.answers[sid] = ans));
+    for (const [sid, qs] of Object.entries(S.manual[from] || {})) {
+      if (dropped.includes(sid)) continue;
+      const m = ((S.manual[to] ||= {})[sid] ||= {});
+      for (const [q, p] of Object.entries(qs)) if (m[q] == null) m[q] = p;
+    }
+    if (!Object.keys(t.answers).length) delete S.students[to]; // 아무 답안도 없으면 응시자로 만들지 않음 (별칭만 기록)
+    delete S.students[from]; delete S.manual[from];
+    for (const k of Object.keys(S.alias)) if (S.alias[k] === from) S.alias[k] = to;
+    S.alias[from] = to;
+    return dropped;
+  }
+
+  const Core = { mergeInto, grade, detectCamp, scope, scoreStudent, analyze, normShort, normMulti, blank };
   if (typeof module !== 'undefined') module.exports = Core; else root.Core = Core;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -9,6 +9,7 @@ let ready;
 const init = (db) => (ready ||= db.batch([
   db.prepare('CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)'),
   db.prepare('CREATE TABLE IF NOT EXISTS answers (name TEXT, subject TEXT, data TEXT, PRIMARY KEY (name, subject))'),
+  db.prepare('CREATE TABLE IF NOT EXISTS alias (src TEXT PRIMARY KEY, dst TEXT)'),
   db.prepare('CREATE TABLE IF NOT EXISTS manual (name TEXT, subject TEXT, q INTEGER, pts REAL, PRIMARY KEY (name, subject, q))'),
 ]).catch((e) => { ready = null; throw e; }));
 
@@ -16,16 +17,18 @@ const ver = async (db) => Number((await db.prepare("SELECT v FROM meta WHERE k='
 const bump = (db) => db.prepare("INSERT INTO meta (k, v) VALUES ('ver', '1') ON CONFLICT(k) DO UPDATE SET v = CAST(v AS INTEGER) + 1");
 
 async function state(db) {
-  const [cfg, ans, man, v] = await Promise.all([
+  const [cfg, ans, man, als, v] = await Promise.all([
     db.prepare("SELECT v FROM meta WHERE k='config'").first('v'),
     db.prepare('SELECT name, subject, data FROM answers').all(),
     db.prepare('SELECT name, subject, q, pts FROM manual').all(),
+    db.prepare('SELECT src, dst FROM alias').all(),
     ver(db),
   ]);
-  const students = {}, manual = {};
+  const students = {}, manual = {}, alias = {};
+  for (const r of als.results) alias[r.src] = r.dst;
   for (const r of ans.results) ((students[r.name] ||= { answers: {} }).answers)[r.subject] = JSON.parse(r.data);
   for (const r of man.results) ((manual[r.name] ||= {})[r.subject] ||= {})[r.q] = r.pts;
-  return { config: cfg ? JSON.parse(cfg) : null, students, manual, ver: v };
+  return { config: cfg ? JSON.parse(cfg) : null, students, manual, alias, ver: v };
 }
 
 const okName = (s) => typeof s === 'string' && s.length > 0 && s.length <= 60;
@@ -52,8 +55,20 @@ async function apply(db, op) {
   } else if (op?.type === 'delStudent') {
     if (!okName(op.name)) throw bad('name');
     st.push(db.prepare('DELETE FROM answers WHERE name = ?').bind(op.name), db.prepare('DELETE FROM manual WHERE name = ?').bind(op.name));
+  } else if (op?.type === 'merge') { // from → to. 같은 영역 답안이 겹치면 to의 것을 유지
+    if (!okName(op.from) || !okName(op.to) || op.from === op.to) throw bad('merge');
+    const f = op.from, to = op.to;
+    st.push(
+      db.prepare('DELETE FROM manual WHERE name = ? AND subject IN (SELECT subject FROM answers WHERE name = ?)').bind(f, to),
+      db.prepare('UPDATE OR IGNORE answers SET name = ? WHERE name = ?').bind(to, f),
+      db.prepare('DELETE FROM answers WHERE name = ?').bind(f),
+      db.prepare('UPDATE OR IGNORE manual SET name = ? WHERE name = ?').bind(to, f),
+      db.prepare('DELETE FROM manual WHERE name = ?').bind(f),
+      db.prepare('UPDATE alias SET dst = ? WHERE dst = ?').bind(to, f),
+      db.prepare('INSERT INTO alias (src, dst) VALUES (?, ?) ON CONFLICT(src) DO UPDATE SET dst = excluded.dst').bind(f, to),
+    );
   } else if (op?.type === 'clearAll') {
-    st.push(db.prepare('DELETE FROM answers'), db.prepare('DELETE FROM manual'));
+    st.push(db.prepare('DELETE FROM answers'), db.prepare('DELETE FROM manual'), db.prepare('DELETE FROM alias'));
   } else throw bad('op');
   await db.batch([...st, bump(db)]);
   return ver(db);

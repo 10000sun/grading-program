@@ -51,6 +51,16 @@ assert.equal(a.total, 8); assert.equal(b.total, 6);
 assert.equal(a.rank, 1); assert.equal(b.rank, 2);
 assert.equal(a.pct, 75); assert.equal(b.pct, 25);
 assert.equal(stats.questions.camp[6].wrongRate, 0.5);
+
+// 병합: 겹치는 영역은 to 유지, 안 겹치는 영역·수동 점수는 이동, 별칭 기록
+const M = { students: { 빡통: { answers: { history: { 1: 'x' }, art: { 1: 'a' } } }, 김빡통: { answers: { history: { 1: 'y' } } } }, manual: { 빡통: { art: { 12: 3 }, history: { 26: 1 } } }, alias: { 옛: '빡통' } };
+assert.deepEqual(C.mergeInto(M, '빡통', '김빡통'), ['history']);
+assert.deepEqual(Object.keys(M.students), ['김빡통']);
+assert.deepEqual(M.students['김빡통'].answers, { history: { 1: 'y' }, art: { 1: 'a' } });
+assert.deepEqual(M.manual, { 김빡통: { art: { 12: 3 } } }); // 버려진 history 답안의 수동 점수는 같이 버림
+assert.deepEqual(M.alias, { 옛: '김빡통', 빡통: '김빡통' });
+const R = { students: {}, manual: {}, alias: {} }; C.mergeInto(R, '없는이름', '대표'); // 존재하지 않는 이름은 별칭만 등록
+assert.deepEqual([R.students, R.alias], [{}, { 없는이름: '대표' }]);
 console.log('ok');
 
 // 기본 설정 점검: 서술 외에는 정답이 모두 있고 형식이 맞아야 함
