@@ -69,30 +69,33 @@ ${body}<p><button data-act="cfgSave">정답 파일로 저장</button> <label cla
 }
 
 // ---------- 2. 업로드 ----------
-const num = (c) => { const m = String(c).trim().match(/^(\d{1,2})\s*(번|[.)]|$)/); return m ? +m[1] : null; };
-function parseSheet(ws) { // 세로(번호|답) 또는 가로(헤더 번호 + 마지막 행 답) 두 배치를 자동 인식
+// 구글폼 응답 시트: 헤더 "성명", "문제 N (X점)" / 행 = 응시자 1명. 영역은 파일명 → 배점 순서로 인식.
+function readForm(ws, fname, def) {
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
-  const out = {}, vert = rows.filter((r) => num(r[0]) !== null);
-  if (vert.length >= 3 && vert.length >= rows.length / 2) { vert.forEach((r) => (out[num(r[0])] = r[1])); return out; }
-  const hi = rows.findIndex((r) => r.filter((c) => num(c) !== null).length >= 3);
-  if (hi >= 0 && rows.length > hi + 1) rows[hi].forEach((c, i) => { const n = num(c); if (n !== null) out[n] = rows[rows.length - 1][i]; });
-  return out;
+  const head = (rows[0] || []).map((h) => String(h).trim());
+  const ni = head.findIndex((h) => /^(성명|이름)/.test(h));
+  const qs = head.map((h, i) => { const m = h.match(/^문제\s*(\d+)\s*(?:\((\d+)\s*점\))?/); return m && { i, n: +m[1], pts: +m[2] || 0 }; }).filter(Boolean);
+  if (ni < 0 || !qs.length) return null;
+  const same = (s) => (s.questions.length === qs.length ? s.questions.filter((q, k) => q.pts === qs[k].pts).length : -1);
+  const best = S.config.subjects.map((s) => [same(s), s]).sort((a, b) => b[0] - a[0])[0];
+  const s = (def && subj(def)) || S.config.subjects.find((x) => [x.name, ...x.alias].some((a) => fname.includes(a))) || (best[0] === qs.length ? best[1] : null);
+  return { s, ni, qs, rows: rows.slice(1).filter((r) => String(r[ni]).trim()) };
 }
 async function importFiles(files) {
   const def = $('#defSubj')?.value;
   for (const f of files) {
     try {
       const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
-      const name = f.name.replace(/\.[^.]+$/, '');
-      const st = (S.students[name] ||= { answers: {} });
-      for (const sn of wb.SheetNames) {
-        const s = S.config.subjects.find((x) => [x.name, ...x.alias].some((a) => sn.includes(a))) || (wb.SheetNames.length === 1 && def ? subj(def) : null);
-        if (!s) { log.push(`${f.name} / ${sn}: 영역을 인식하지 못했습니다 (시트 이름에 영역명 포함 또는 아래 기본 영역 선택)`); continue; }
-        const a = parseSheet(wb.Sheets[sn]);
-        if (!Object.keys(a).length) { log.push(`${f.name} / ${sn}: 답안을 읽지 못했습니다`); continue; }
-        st.answers[s.id] = a;
-        log.push(`${name}: ${s.name} ${Object.keys(a).length}문항 읽음`);
+      const form = wb.SheetNames.map((sn) => readForm(wb.Sheets[sn], f.name, def)).find(Boolean);
+      if (!form) { log.push(`${f.name}: 구글폼 응답 형식이 아닙니다 ("성명", "문제 N" 열 필요)`); continue; }
+      if (!form.s) { log.push(`${f.name}: 영역을 인식하지 못했습니다 (아래 "영역 직접 지정" 사용)`); continue; }
+      const seen = {}; let dup = 0;
+      for (const r of form.rows) { // 같은 이름이 여러 번 제출되면 마지막(최신) 응답 사용
+        const name = String(r[form.ni]).trim().replace(/\s+/g, ' ');
+        if (seen[name]) dup++; seen[name] = 1;
+        ((S.students[name] ||= { answers: {} }).answers)[form.s.id] = Object.fromEntries(form.qs.map((q) => [q.n, r[q.i]]));
       }
+      log.push(`${f.name}: ${form.s.name} ${Object.keys(seen).length}명 읽음${dup ? ` (중복 제출 ${dup}건은 최신 응답 사용)` : ''}`);
     } catch (err) { log.push(`${f.name}: 오류 ${err.message}`); }
   }
   save(); render();
@@ -102,9 +105,9 @@ function importTab() {
   const rows = st.rows.map((r) => `<tr><td class="l">${esc(r.name)}</td><td>${r.res.camp || '-'}</td>
 ${cols.map((s) => `<td>${r.res.subjects[s.id].taken ? '✓' : ''}</td>`).join('')}
 <td class="bad l">${esc(r.res.flags.join(' / '))}</td><td><button data-act="del" data-name="${esc(r.name)}">삭제</button></td></tr>`).join('');
-  return guide('② 응시자 엑셀을 올리세요.', '파일 이름 = 응시자 이름, 시트 이름 = 영역(역사·콘텐츠·캠프)')
+  return guide('② 구글폼 응답 엑셀을 올리세요.', '영역별 파일 그대로 여러 개 올리면 됩니다. 성명 열이 이름이고, 영역은 파일 이름·배점으로 자동 인식합니다.')
     + `<label class="drop">📂 엑셀 파일을 여기에 끌어다 놓거나 클릭해서 선택 (여러 개 가능)<input type="file" id="files" multiple accept=".xlsx,.xls,.csv" hidden></label>
-<details class="help"><summary>시트 이름으로 영역이 인식되지 않을 때</summary>시트가 1개인 파일의 영역을 직접 지정:
+<details class="help"><summary>영역이 인식되지 않을 때</summary>올리는 파일의 영역을 직접 지정:
 <select id="defSubj"><option value="">(선택 안 함)</option>${S.config.subjects.map((s) => `<option value="${s.id}">${s.name}</option>`).join('')}</select></details>
 <h3>총 응시자 ${st.rows.length}명</h3>
 <p class="mut">${cols.map((s) => `${s.name} ${st.subjects[s.id].n}명`).join(' · ')}<br>캠프별 ${Object.entries(st.camps).map(([c, v]) => `${c} ${v.n}명`).join(' · ') || '-'}</p>
@@ -119,7 +122,7 @@ function manual() {
   for (const s of S.config.subjects) for (const q of s.questions) {
     if (q.type === 'essay') {
       const rows = st.rows.map((r) => ({ r, d: r.res.subjects[s.id].detail[q.n] })).filter((x) => x.d && !Core.blank(x.d.raw));
-      out.push(`<details><summary>${s.name} ${q.n}번 (서술, ${q.pts}점) <span class="mut">${rows.filter((x) => x.d.pending).length}건 미채점</span></summary>
+      if (rows.length) out.push(`<details><summary>${s.name} ${q.n}번 (서술, ${q.pts}점) <span class="mut">${rows.filter((x) => x.d.pending).length}건 미채점</span></summary>
 <p class="mut">모범답안: ${esc(q.ans) || '-'}</p><table>${rows.map(({ r, d }) => `<tr><td class="l">${esc(r.name)}</td><td class="l" style="white-space:normal;max-width:520px">${esc(d.raw)}</td>
 <td><input class="n" type="number" min="0" max="${q.pts}" step="0.5" value="${S.manual[r.name]?.[s.id]?.[q.n] ?? ''}" data-mp='${esc(JSON.stringify([s.id, q.n, r.name]))}'> / ${q.pts}</td></tr>`).join('')}</table></details>`);
     } else if (q.type === 'short') {
