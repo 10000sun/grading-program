@@ -7,7 +7,7 @@ const sub = (id) => cfg.subjects.find((s) => s.id === id);
 // 정답 세팅
 sub('history').questions[0].ans = '3';
 sub('history').questions[26].ans = '2';           // 27번(mc)
-sub('history').questions[27].ans = '만해|Manhae';   // 28번 단답
+sub('history').questions[27].ans = '만해,Manhae';   // 28번 단답
 sub('content').questions[7].ans = '1,3';           // 8번 복수
 const camp = sub('camp');
 camp.questions[5].ans = '2';   // 6번 (나래)
