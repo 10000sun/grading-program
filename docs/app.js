@@ -84,7 +84,9 @@ function setup() {
 <td><select data-s="${s.id}" data-n="${q.n}" data-f="type">${Object.entries(TYPES).map(([k, v]) => `<option value="${k}" ${q.type === k ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
 <td><input class="n" type="number" min="0" value="${q.pts}" data-s="${s.id}" data-n="${q.n}" data-f="pts"></td>
 <td class="l"><input class="a" value="${esc(q.ans)}" ${q.type === 'essay' ? 'disabled placeholder="수동 채점"' : ''} data-s="${s.id}" data-n="${q.n}" data-f="ans"
- placeholder="${{ mc: '예) 3', multi: '예) 1,3', short: '예) 정답,다른표기' }[q.type] || ''}"></td></tr>`;
+ placeholder="${{ mc: '예) 3', multi: '예) 1,3', short: '예) 정답,다른표기' }[q.type] || ''}">
+${q.type === 'short' ? `<br><input class="a" value="${esc(q.half)}" data-s="${s.id}" data-n="${q.n}" data-f="half" placeholder="반만 인정할 표기 (쉼표로 구분)">
+<br><input class="a" value="${esc(q.wrong)}" data-s="${s.id}" data-n="${q.n}" data-f="wrong" placeholder="오답으로 확정한 표기 (검토 목록에서 숨김)">` : ''}</td></tr>`;
     }).join('');
     return `<details><summary>${s.name} <span class="mut">${s.group === 'common' ? '공통' : '선택'} · ${s.questions.length}문항</span>
  ${missing ? `<span class="badge bad">정답 ${missing}개 비어 있음</span>` : '<span class="badge ok">✓ 입력 완료</span>'}</summary>
@@ -94,7 +96,7 @@ function setup() {
     + `<details class="help"><summary>입력 방법 보기</summary><ul>
 <li>객관식: <code>3</code> (숫자 1~5)</li><li>복수선택: <code>1,3</code> (순서 상관없음)</li>
 <li>단답: <code>정답,다른표기</code> (쉼표로 인정 답 여러 개) · 두 칸짜리 답은 <code>철수 영희</code>처럼 공백으로</li>
-<li>서술(수동): 정답 없이 ③ 수동 채점 탭에서 점수를 직접 줍니다</li></ul></details>
+<li>③ 수동 채점 탭의 단답 오답 검토: "정답 인정", "반만 인정"(배점의 절반), "오답 처리" 중 하나를 누르면 검토가 끝나 다시 뜨지 않습니다. 단답 문항 아래 칸에서 직접 고칠 수도 있습니다</li><li>서술(수동): 정답 없이 ③ 수동 채점 탭에서 점수를 직접 줍니다</li></ul></details>
 ${body}<p><button data-act="cfgSave">정답 파일로 저장</button> <label class="btn">정답 파일 불러오기 <input type="file" id="cfgfile" accept=".json" hidden></label></p>`;
 }
 
@@ -159,9 +161,10 @@ function manual() {
 <p class="mut">모범답안: ${esc(q.ans) || '-'}</p><table>${rows.map(({ r, d }) => `<tr><td class="l">${esc(r.name)}</td><td class="l" style="white-space:normal;max-width:520px">${esc(d.raw)}</td>
 <td><input class="n" type="number" min="0" max="${q.pts}" step="0.5" value="${S.manual[r.name]?.[s.id]?.[q.n] ?? ''}" data-mp='${esc(JSON.stringify([s.id, q.n, r.name]))}'> / ${q.pts}</td></tr>`).join('')}</table></details>`);
     } else if (q.type === 'short') {
-      const wrong = Object.entries(st.questions[s.id][q.n].dist).filter(([k, v]) => !v.ok && k !== '무응답').sort((a, b) => b[1].count - a[1].count);
+      const done = new Set(String(q.wrong || '').split(',').map(Core.normShort)); // 정답/반만/오답 처리한 표기는 다시 안 뜸
+      const wrong = Object.entries(st.questions[s.id][q.n].dist).filter(([k, v]) => !v.ok && !v.half && !done.has(k) && k !== '무응답').sort((a, b) => b[1].count - a[1].count);
       if (wrong.length) out.push(`<details><summary>${s.name} ${q.n}번 단답 오답 검토 <span class="mut">(${wrong.length}종)</span></summary><table>
-${wrong.map(([, v]) => `<tr><td class="l">${esc(v.raw)}</td><td>${v.count}명</td><td><button data-act="accept" data-s="${s.id}" data-n="${q.n}" data-raw="${esc(v.raw)}">정답 인정</button></td></tr>`).join('')}</table></details>`);
+${wrong.map(([, v]) => `<tr><td class="l">${esc(v.raw)}</td><td>${v.count}명</td><td><button data-act="accept" data-s="${s.id}" data-n="${q.n}" data-raw="${esc(v.raw)}">정답 인정</button> <button data-act="half" data-s="${s.id}" data-n="${q.n}" data-raw="${esc(v.raw)}">반만 인정</button> <button data-act="wrong" data-s="${s.id}" data-n="${q.n}" data-raw="${esc(v.raw)}">오답 처리</button></td></tr>`).join('')}</table></details>`);
     }
   }
   return guide('③ 서술형 점수를 주세요.', '서술형은 점수 입력, 단답은 오답 중 정답으로 인정할 표기를 눌러 추가합니다. (건너뛰어도 됩니다)') + (out.join('') || '<p class="mut">검토할 항목이 없습니다.</p>');
@@ -185,7 +188,7 @@ ${sels.map((s) => `<td>${r.res.subjects[s.id].taken ? r.res.subjects[s.id].score
 <table>${head}${rows}</table>
 <p>개인 상세: <select id="selStudent"><option value="">이름 선택</option>${st.rows.map((r) => `<option ${r.name === sel ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></p>
 ${who ? S.config.subjects.map((s) => { const o = who.res.subjects[s.id]; if (!o.taken) return ''; return `<details open><summary>${s.name} ${o.score}/${o.max}</summary><table><tr>${Object.keys(o.detail).map((n) => `<th>${n}</th>`).join('')}</tr>
-<tr>${Object.values(o.detail).map((d) => `<td class="${d.pending ? 'mut' : d.ok ? 'ok' : 'bad'}">${d.pending ? '…' : d.pts}</td>`).join('')}</tr></table></details>`; }).join('') : ''}`;
+<tr>${Object.values(o.detail).map((d) => `<td class="${d.pending ? 'mut' : d.ok ? 'ok' : d.pts ? '' : 'bad'}">${d.pending ? '…' : d.pts}</td>`).join('')}</tr></table></details>`; }).join('') : ''}`;
 }
 
 // ---------- 5. 문항 분석 ----------
@@ -212,12 +215,21 @@ function items() {
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => { e.preventDefault(); if (tab === 'import') importFiles([...e.dataTransfer.files]); });
 
+// 단답 오답 검토: 표기를 ans(정답)/half(반만)/wrong(오답 확정) 목록에 추가 — 어느 쪽이든 검토 완료로 다시 안 뜸
+function mark(d, field) {
+  const q = subj(d.s).questions[d.n - 1], raw = d.raw.replace(/,/g, ' ');
+  q[field] = q[field] ? `${q[field]},${raw}` : raw;
+  op({ type: 'setConfig', config: S.config }); render();
+}
+
 // ---------- 동작 ----------
 const ACT = {
   cfgSave: () => download('정답설정.json', new Blob([JSON.stringify(S.config, null, 1)], { type: 'application/json' })),
   del: (d) => { delete S.students[d.name]; delete S.manual[d.name]; op({ type: 'delStudent', name: d.name }); render(); },
   clearAll: () => { if (confirm('응시자 데이터를 모두 삭제할까요?')) { S.students = {}; S.manual = {}; op({ type: 'clearAll' }); render(); } },
-  accept: (d) => { const q = subj(d.s).questions[d.n - 1]; const raw = d.raw.replace(/,/g, ' '); q.ans = q.ans ? `${q.ans},${raw}` : raw; op({ type: 'setConfig', config: S.config }); render(); },
+  half: (d) => mark(d, 'half'),
+  wrong: (d) => mark(d, 'wrong'),
+  accept: (d) => mark(d, 'ans'),
   sort: () => { qSort = !qSort; render(); },
   exportXlsx: () => {
     const st = stats(), wb = XLSX.utils.book_new();
