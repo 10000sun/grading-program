@@ -102,34 +102,38 @@ ${body}<p><button data-act="cfgSave">정답 파일로 저장</button> <label cla
 
 // ---------- 2. 업로드 ----------
 // 구글폼 응답 시트: 헤더 "성명", "문제 N (X점)" / 행 = 응시자 1명. 영역은 파일명 → 배점 순서로 인식.
-function readForm(ws, fname, def) {
+function readForm(ws, sn, fname, def) { // 영역 판별 우선순위: 직접 지정(시트 1개일 때) > 시트 이름 > 파일 이름 > 문항 수·배점
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
   const head = (rows[0] || []).map((h) => String(h).trim());
   const ni = head.findIndex((h) => /^(성명|이름)/.test(h));
-  const qs = head.map((h, i) => { const m = h.match(/^문제\s*(\d+)\s*(?:\((\d+)\s*점\))?/); return m && { i, n: +m[1], pts: +m[2] || 0 }; }).filter(Boolean);
+  const qs = head.map((h, i) => { const m = h.match(/^(?:\[[^\]]*\]\s*)?문제\s*(\d+)\s*(?:\((\d+)\s*점\))?/); return m && { i, n: +m[1], pts: +m[2] || 0 }; }).filter(Boolean); // "[여백] 문제 1 (4점)" 형태도 허용
   if (ni < 0 || !qs.length) return null;
+  const named = (txt) => S.config.subjects.find((x) => [x.name, ...x.alias].some((a) => txt.includes(a)));
   const same = (s) => (s.questions.length === qs.length ? s.questions.filter((q, k) => q.pts === qs[k].pts).length : -1);
   const best = S.config.subjects.map((s) => [same(s), s]).sort((a, b) => b[0] - a[0])[0];
-  const s = (def && subj(def)) || S.config.subjects.find((x) => [x.name, ...x.alias].some((a) => fname.includes(a))) || (best[0] === qs.length ? best[1] : null);
-  return { s, ni, qs, rows: rows.slice(1).filter((r) => String(r[ni]).trim()) };
+  const s = (def && subj(def)) || named(sn) || named(fname) || (best[0] === qs.length ? best[1] : null);
+  return { s, sn, ni, qs, rows: rows.slice(1).filter((r) => String(r[ni]).trim()) };
 }
 async function importFiles(files) {
   const def = $('#defSubj')?.value, rows = [];
   for (const f of files) {
     try {
       const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
-      const form = wb.SheetNames.map((sn) => readForm(wb.Sheets[sn], f.name, def)).find(Boolean);
-      if (!form) { log.push(`${f.name}: 구글폼 응답 형식이 아닙니다 ("성명", "문제 N" 열 필요)`); continue; }
-      if (!form.s) { log.push(`${f.name}: 영역을 인식하지 못했습니다 (아래 "영역 직접 지정" 사용)`); continue; }
-      const seen = {}; let dup = 0;
-      for (const r of form.rows) { // 같은 이름이 여러 번 제출되면 마지막(최신) 응답 사용
-        const raw = String(r[form.ni]).trim().replace(/\s+/g, ' ').slice(0, 60), name = S.alias?.[raw] || raw; // 병합해 둔 이름은 대표 이름으로
-        if (seen[name]) dup++; seen[name] = 1;
-        const answers = Object.fromEntries(form.qs.map((q) => [q.n, r[q.i]]));
-        ((S.students[name] ||= { answers: {} }).answers)[form.s.id] = answers;
-        rows.push({ name, subject: form.s.id, answers });
+      const forms = wb.SheetNames.map((sn) => readForm(wb.Sheets[sn], sn, f.name, wb.SheetNames.length === 1 ? def : '')).filter(Boolean);
+      if (!forms.length) { log.push(`${f.name}: 구글폼 응답 형식이 아닙니다 ("성명", "문제 N" 열 필요)`); continue; }
+      for (const form of forms) { // 시트마다 각각 가져옴
+        const label = wb.SheetNames.length > 1 ? `${f.name} [${form.sn}]` : f.name;
+        if (!form.s) { log.push(`${label}: 영역을 인식하지 못했습니다 (시트 이름에 영역명을 넣거나 "영역 직접 지정" 사용)`); continue; }
+        const seen = {}; let dup = 0;
+        for (const r of form.rows) { // 같은 이름이 여러 번 제출되면 마지막(최신) 응답 사용
+          const raw = String(r[form.ni]).trim().replace(/\s+/g, ' ').slice(0, 60), name = S.alias?.[raw] || raw; // 병합해 둔 이름은 대표 이름으로
+          if (seen[name]) dup++; seen[name] = 1;
+          const answers = Object.fromEntries(form.qs.map((q) => [q.n, r[q.i]]));
+          ((S.students[name] ||= { answers: {} }).answers)[form.s.id] = answers;
+          rows.push({ name, subject: form.s.id, answers });
+        }
+        log.push(`${label}: ${form.s.name} ${Object.keys(seen).length}명 읽음${dup ? ` (중복 제출 ${dup}건은 최신 응답 사용)` : ''}`);
       }
-      log.push(`${f.name}: ${form.s.name} ${Object.keys(seen).length}명 읽음${dup ? ` (중복 제출 ${dup}건은 최신 응답 사용)` : ''}`);
     } catch (err) { log.push(`${f.name}: 오류 ${err.message}`); }
   }
   for (let i = 0; i < rows.length; i += 50) await op({ type: 'putAnswers', rows: rows.slice(i, i + 50) });
@@ -140,7 +144,7 @@ function importTab() {
   const rows = st.rows.map((r) => `<tr><td class="l">${esc(r.name)}</td><td>${r.res.camp || '-'}</td>
 ${cols.map((s) => `<td>${r.res.subjects[s.id].taken ? '✓' : ''}</td>`).join('')}
 <td class="bad l">${esc(r.res.flags.join(' / '))}</td><td><button data-act="del" data-name="${esc(r.name)}">삭제</button></td></tr>`).join('');
-  return guide('② 구글폼 응답 엑셀을 올리세요.', '영역별 파일 그대로 여러 개 올리면 됩니다. 성명 열이 이름이고, 영역은 파일 이름·배점으로 자동 인식합니다.')
+  return guide('② 구글폼 응답 엑셀을 올리세요.', '파일 하나에 시트가 여러 개여도, 영역별 파일 여러 개여도 됩니다. 성명 열이 이름이고, 영역은 시트 이름·파일 이름·배점으로 자동 인식합니다.')
     + `<label class="drop">📂 엑셀 파일을 여기에 끌어다 놓거나 클릭해서 선택 (여러 개 가능)<input type="file" id="files" multiple accept=".xlsx,.xls,.csv" hidden></label>
 <details class="help"><summary>영역이 인식되지 않을 때</summary>올리는 파일의 영역을 직접 지정:
 <select id="defSubj"><option value="">(선택 안 함)</option>${S.config.subjects.map((s) => `<option value="${s.id}">${s.name}</option>`).join('')}</select></details>

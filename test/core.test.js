@@ -51,6 +51,7 @@ assert.equal(a.total, 8); assert.equal(b.total, 6);
 assert.equal(a.rank, 1); assert.equal(b.rank, 2);
 assert.equal(a.pct, 75); assert.equal(b.pct, 25);
 assert.equal(stats.questions.camp[6].wrongRate, 0.5);
+assert.deepEqual(Object.keys(C.analyze(cfg, { 역사만: { answers: { history: { 1: '3' } } }, ...{ A: st } }, {}).camps), ['나래']); // 캠프를 안 푼 사람은 캠프별 집계에서 제외
 
 // 병합: 겹치는 영역은 to 유지, 안 겹치는 영역·수동 점수는 이동, 별칭 기록
 const M = { students: { 빡통: { answers: { history: { 1: 'x' }, art: { 1: 'a' } } }, 김빡통: { answers: { history: { 1: 'y' } } } }, manual: { 빡통: { art: { 12: 3 }, history: { 26: 1 } } }, alias: { 옛: '빡통' } };
