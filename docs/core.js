@@ -109,7 +109,9 @@
         qs[q.n] = { att: att.length, right, wrongRate: att.length ? 1 - right / att.length : 0, dist };
       }
     }
+    const campId = cfg.subjects.find((s) => s.camps)?.id;
     for (const r of rows) {
+      if (!r.res.subjects[campId]?.taken) continue; // 캠프 영역을 푼 사람만 캠프별로 집계
       const c = r.res.camp || '미판별';
       (stats.camps[c] ||= { n: 0, sum: 0 });
       stats.camps[c].n++; stats.camps[c].sum += r.res.total;
