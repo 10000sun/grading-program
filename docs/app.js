@@ -162,16 +162,20 @@ ${log.length ? `<details><summary>가져오기 기록</summary><pre>${esc(log.sl
 // ---------- 3. 수동 채점 ----------
 function manual() {
   const st = stats(), out = [];
+  const refText = (q) => (q.type === 'short' ? String(q.ans || '').split(',').filter(Boolean).join(' / ') : String(q.ans || '')); // 단답은 인정 표기 전부
+  const refBox = (q) => `<div class="ref"><b>모범답안</b> <span style="white-space:pre-wrap">${esc(refText(q)) || '-'}</span>${q.half ? `<br><span class="mut">반만 인정: ${esc(String(q.half).split(',').join(' / '))}</span>` : ''}</div>`;
+  const refShort = (q) => { const t = refText(q).replace(/\s+/g, ' '); return `<span class="ref-inline">모범답안: ${esc(t.length > 40 ? t.slice(0, 40) + '…' : t) || '-'}</span>`; };
   for (const s of S.config.subjects) for (const q of s.questions) {
     if (q.type === 'essay') {
       const rows = st.rows.map((r) => ({ r, d: r.res.subjects[s.id].detail[q.n] })).filter((x) => x.d && !Core.blank(x.d.raw));
-      if (rows.length) out.push(`<details><summary>${s.name} ${q.n}번 (서술, ${q.pts}점) <span class="mut">${rows.filter((x) => x.d.pending).length}건 미채점</span></summary>
-<p class="mut">모범답안: ${esc(q.ans) || '-'}</p><table>${rows.map(({ r, d }) => `<tr><td class="l">${esc(r.name)}</td><td class="l" style="white-space:normal;max-width:520px">${esc(d.raw)}</td>
+      if (rows.length) out.push(`<details><summary>${s.name} ${q.n}번 (서술, ${q.pts}점) <span class="mut">${rows.filter((x) => x.d.pending).length}건 미채점</span> ${refShort(q)}</summary>
+${refBox(q)}<table>${rows.map(({ r, d }) => `<tr><td class="l">${esc(r.name)}</td><td class="l" style="white-space:normal;max-width:520px">${esc(d.raw)}</td>
 <td><input class="n" type="number" min="0" max="${q.pts}" step="0.5" value="${S.manual[r.name]?.[s.id]?.[q.n] ?? ''}" data-mp='${esc(JSON.stringify([s.id, q.n, r.name]))}'> / ${q.pts}</td></tr>`).join('')}</table></details>`);
     } else if (q.type === 'short') {
       const done = new Set(String(q.wrong || '').split(',').map(Core.normShort)); // 정답/반만/오답 처리한 표기는 다시 안 뜸
       const wrong = Object.entries(st.questions[s.id][q.n].dist).filter(([k, v]) => !v.ok && !v.half && !done.has(k) && k !== '무응답').sort((a, b) => b[1].count - a[1].count);
-      if (wrong.length) out.push(`<details><summary>${s.name} ${q.n}번 단답 오답 검토 <span class="mut">(${wrong.length}종)</span></summary><table>
+      if (wrong.length) out.push(`<details><summary>${s.name} ${q.n}번 단답 오답 검토 <span class="mut">(${wrong.length}종)</span> ${refShort(q)}</summary>
+${refBox(q)}<table>
 ${wrong.map(([, v]) => `<tr><td class="l">${esc(v.raw)}</td><td>${v.count}명</td><td><button data-act="accept" data-s="${s.id}" data-n="${q.n}" data-raw="${esc(v.raw)}">정답 인정</button> <button data-act="half" data-s="${s.id}" data-n="${q.n}" data-raw="${esc(v.raw)}">반만 인정</button> <button data-act="wrong" data-s="${s.id}" data-n="${q.n}" data-raw="${esc(v.raw)}">오답 처리</button></td></tr>`).join('')}</table></details>`);
     }
   }
