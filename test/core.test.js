@@ -22,7 +22,7 @@ assert.equal(C.grade(sub('content').questions[7], '1').ok, false);
 assert.equal(C.grade(sub('history').questions[27], ' manhae ').ok, true);
 
 // 서술형: 수동 점수 전엔 pending
-const essay = sub('history').questions[24];
+const essay = sub('history').questions[25];
 assert.equal(C.grade(essay, '답').pending, true);
 assert.deepEqual([C.grade(essay, '답', 1).pts, C.grade(essay, '답', 99).pts], [1, essay.pts]);
 
@@ -48,3 +48,12 @@ assert.equal(a.rank, 1); assert.equal(b.rank, 2);
 assert.equal(a.pct, 75); assert.equal(b.pct, 25);
 assert.equal(stats.questions.camp[6].wrongRate, 0.5);
 console.log('ok');
+
+// 기본 설정 점검: 서술 외에는 정답이 모두 있고 형식이 맞아야 함
+for (const s of globalThis.DEFAULT_CONFIG.subjects) for (const q of s.questions) {
+  const id = s.id + ' ' + q.n;
+  if (q.type !== 'essay') assert.ok(q.ans, id + ' 정답 없음');
+  if (q.type === 'mc') assert.match(q.ans, /^[1-5]$/, id);
+  if (q.type === 'multi') assert.match(q.ans, /^[1-5](,[1-5])+$/, id);
+}
+console.log('defaults ok');

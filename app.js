@@ -6,7 +6,7 @@ const f1 = (x) => (Math.round(x * 10) / 10).toFixed(1);
 
 let S = load(), tab = 'setup', log = [], sel = '', qSubj = 'history', qSort = false, showStd = false;
 function load() {
-  try { const j = JSON.parse(localStorage.getItem(KEY)); if (j?.config) return j; } catch {}
+  try { const j = JSON.parse(localStorage.getItem(KEY)); if (j?.config) { if (j.config.version !== DEFAULT_CONFIG.version) j.config = structuredClone(DEFAULT_CONFIG); return j; } } catch {}
   return { config: structuredClone(DEFAULT_CONFIG), students: {}, manual: {} };
 }
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {} };
@@ -120,7 +120,7 @@ function manual() {
     if (q.type === 'essay') {
       const rows = st.rows.map((r) => ({ r, d: r.res.subjects[s.id].detail[q.n] })).filter((x) => x.d && !Core.blank(x.d.raw));
       out.push(`<details><summary>${s.name} ${q.n}번 (서술, ${q.pts}점) <span class="mut">${rows.filter((x) => x.d.pending).length}건 미채점</span></summary>
-<table>${rows.map(({ r, d }) => `<tr><td class="l">${esc(r.name)}</td><td class="l" style="white-space:normal;max-width:520px">${esc(d.raw)}</td>
+<p class="mut">모범답안: ${esc(q.ans) || '-'}</p><table>${rows.map(({ r, d }) => `<tr><td class="l">${esc(r.name)}</td><td class="l" style="white-space:normal;max-width:520px">${esc(d.raw)}</td>
 <td><input class="n" type="number" min="0" max="${q.pts}" step="0.5" value="${S.manual[r.name]?.[s.id]?.[q.n] ?? ''}" data-mp='${esc(JSON.stringify([s.id, q.n, r.name]))}'> / ${q.pts}</td></tr>`).join('')}</table></details>`);
     } else if (q.type === 'short') {
       const wrong = Object.entries(st.questions[s.id][q.n].dist).filter(([k, v]) => !v.ok && k !== '무응답').sort((a, b) => b[1].count - a[1].count);
