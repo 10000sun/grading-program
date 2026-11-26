@@ -1,6 +1,6 @@
 const assert = require('assert');
-require('../public/default-config.js');
-const C = require('../public/core.js');
+require('../docs/default-config.js');
+const C = require('../docs/core.js');
 const cfg = structuredClone(globalThis.DEFAULT_CONFIG);
 const sub = (id) => cfg.subjects.find((s) => s.id === id);
 

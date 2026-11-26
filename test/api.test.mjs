@@ -37,4 +37,7 @@ for (const op of [{ type: 'nope' }, { type: 'putAnswers', rows: [{ name: '', sub
   { type: 'setManual', name: 'a', subject: 'art', n: 1, pts: 999 }, { type: 'setConfig', config: {} }]) assert.equal((await call('POST', 'op', op))[0], 400);
 assert.equal((await call('GET', 'version'))[1].v, v0);
 assert.equal((await call('GET', 'nope'))[0], 404);
+const pre = await onRequest({ request: new Request('http://x/api/op', { method: 'OPTIONS' }), env, params: { route: ['op'] } });
+assert.equal(pre.status, 204);
+assert.equal(pre.headers.get('access-control-allow-origin'), '*');
 console.log('api ok');
