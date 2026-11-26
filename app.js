@@ -4,7 +4,7 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const f1 = (x) => (Math.round(x * 10) / 10).toFixed(1);
 
-let S = load(), tab = 'setup', log = [], sel = '', qSubj = 'history', qSort = false;
+let S = load(), tab = 'setup', log = [], sel = '', qSubj = 'history', qSort = false, showStd = false;
 function load() {
   try { const j = JSON.parse(localStorage.getItem(KEY)); if (j?.config) return j; } catch {}
   return { config: structuredClone(DEFAULT_CONFIG), students: {}, manual: {} };
@@ -39,10 +39,12 @@ document.addEventListener('change', (e) => {
   } else if (e.target.id === 'files') importFiles([...e.target.files]);
   else if (e.target.id === 'cfgfile') e.target.files[0].text().then((t) => { S.config = JSON.parse(t); save(); render(); });
   else if (e.target.id === 'selStudent') { sel = e.target.value; render(); }
+  else if (e.target.id === 'showStd') { showStd = e.target.checked; render(); }
   else if (e.target.id === 'qSubj') { qSubj = e.target.value; render(); }
 });
 
 // ---------- 1. 정답 세팅 ----------
+const guide = (h, s) => `<div class="guide"><b>${h}</b> ${s}</div>`;
 function setup() {
   const body = S.config.subjects.map((s) => {
     const missing = s.questions.filter((q) => q.type !== 'essay' && !q.ans).length;
@@ -52,14 +54,18 @@ function setup() {
 <td><select data-s="${s.id}" data-n="${q.n}" data-f="type">${Object.entries(TYPES).map(([k, v]) => `<option value="${k}" ${q.type === k ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
 <td><input class="n" type="number" min="0" value="${q.pts}" data-s="${s.id}" data-n="${q.n}" data-f="pts"></td>
 <td class="l"><input class="a" value="${esc(q.ans)}" ${q.type === 'essay' ? 'disabled placeholder="수동 채점"' : ''} data-s="${s.id}" data-n="${q.n}" data-f="ans"
- placeholder="${{ mc: '1~5', multi: '1,3', short: '정답1,정답2' }[q.type] || ''}"></td></tr>`;
+ placeholder="${{ mc: '예) 3', multi: '예) 1,3', short: '예) 정답,다른표기' }[q.type] || ''}"></td></tr>`;
     }).join('');
-    return `<details ${missing ? 'open' : ''}><summary>${s.name} <span class="mut">(${s.group === 'common' ? '공통' : '선택'} · ${s.questions.length}문항 · 만점 ${s.camps ? '60(캠프별)' : s.questions.reduce((a, q) => a + q.pts, 0)})</span>
- ${missing ? `<span class="bad">정답 미입력 ${missing}</span>` : '<span class="ok">입력 완료</span>'}</summary>
-<table><tr><th>번호</th><th>구분</th><th>유형</th><th>배점</th><th>정답 (단답은 , 로 복수 인정답)</th></tr>${rows}</table></details>`;
+    return `<details><summary>${s.name} <span class="mut">${s.group === 'common' ? '공통' : '선택'} · ${s.questions.length}문항</span>
+ ${missing ? `<span class="badge bad">정답 ${missing}개 비어 있음</span>` : '<span class="badge ok">✓ 입력 완료</span>'}</summary>
+<table><tr><th>번호</th><th>구분</th><th>유형</th><th>배점</th><th>정답</th></tr>${rows}</table></details>`;
   }).join('');
-  return `<p>객관식은 1~5, 복수선택은 <code>1,3</code>, 단답은 <code>정답,다른표기</code>로 입력합니다. 입력은 이 브라우저에 자동 저장됩니다.</p>
-<p><button data-act="cfgSave">설정 파일로 저장</button> <label>불러오기 <input type="file" id="cfgfile" accept=".json"></label></p>${body}`;
+  return guide('① 정답을 입력하세요.', '영역을 눌러 펼친 뒤 정답칸에 적습니다. 자동 저장됩니다.')
+    + `<details class="help"><summary>입력 방법 보기</summary><ul>
+<li>객관식: <code>3</code> (숫자 1~5)</li><li>복수선택: <code>1,3</code> (순서 상관없음)</li>
+<li>단답: <code>정답,다른표기</code> (쉼표로 인정 답 여러 개) · 두 칸짜리 답은 <code>철수 영희</code>처럼 공백으로</li>
+<li>서술(수동): 정답 없이 ③ 수동 채점 탭에서 점수를 직접 줍니다</li></ul></details>
+${body}<p><button data-act="cfgSave">정답 파일로 저장</button> <label class="btn">정답 파일 불러오기 <input type="file" id="cfgfile" accept=".json" hidden></label></p>`;
 }
 
 // ---------- 2. 업로드 ----------
@@ -92,18 +98,19 @@ async function importFiles(files) {
   save(); render();
 }
 function importTab() {
-  const st = stats();
+  const st = stats(), cols = S.config.subjects.filter((s) => s.group === 'common' || st.subjects[s.id].n > 0);
   const rows = st.rows.map((r) => `<tr><td class="l">${esc(r.name)}</td><td>${r.res.camp || '-'}</td>
-${S.config.subjects.map((s) => `<td>${r.res.subjects[s.id].taken ? '✓' : ''}</td>`).join('')}
+${cols.map((s) => `<td>${r.res.subjects[s.id].taken ? '✓' : ''}</td>`).join('')}
 <td class="bad l">${esc(r.res.flags.join(' / '))}</td><td><button data-act="del" data-name="${esc(r.name)}">삭제</button></td></tr>`).join('');
-  return `<p>응시자 한 명당 엑셀 한 개. <b>파일 이름 = 응시자 이름</b>, 시트 이름에 영역명(역사/콘텐츠/캠프/…)이 들어가야 합니다.</p>
-<p><input type="file" id="files" multiple accept=".xlsx,.xls,.csv"> 시트가 1개이고 이름으로 인식 안 될 때 영역:
-<select id="defSubj"><option value="">(선택 안 함)</option>${S.config.subjects.map((s) => `<option value="${s.id}">${s.name}</option>`).join('')}</select></p>
-<p><b>총 응시자 ${st.rows.length}명</b> · 영역별 ${S.config.subjects.map((s) => `${s.name} ${st.subjects[s.id].n}명`).join(' · ')}<br>
-캠프별 ${Object.entries(st.camps).map(([c, v]) => `${c} ${v.n}명`).join(' · ') || '-'} <span class="mut">(캠프는 푼 캠프 문항으로 자동 판별)</span></p>
-<table><tr><th>이름</th><th>캠프</th>${S.config.subjects.map((s) => `<th>${s.name}</th>`).join('')}<th>경고</th><th></th></tr>${rows}</table>
-<button data-act="clearAll">응시자 전체 삭제</button>
-${log.length ? `<details open><summary>가져오기 기록</summary><pre>${esc(log.slice(-40).join('\n'))}</pre></details>` : ''}`;
+  return guide('② 응시자 엑셀을 올리세요.', '파일 이름 = 응시자 이름, 시트 이름 = 영역(역사·콘텐츠·캠프)')
+    + `<label class="drop">📂 엑셀 파일을 여기에 끌어다 놓거나 클릭해서 선택 (여러 개 가능)<input type="file" id="files" multiple accept=".xlsx,.xls,.csv" hidden></label>
+<details class="help"><summary>시트 이름으로 영역이 인식되지 않을 때</summary>시트가 1개인 파일의 영역을 직접 지정:
+<select id="defSubj"><option value="">(선택 안 함)</option>${S.config.subjects.map((s) => `<option value="${s.id}">${s.name}</option>`).join('')}</select></details>
+<h3>총 응시자 ${st.rows.length}명</h3>
+<p class="mut">${cols.map((s) => `${s.name} ${st.subjects[s.id].n}명`).join(' · ')}<br>캠프별 ${Object.entries(st.camps).map(([c, v]) => `${c} ${v.n}명`).join(' · ') || '-'}</p>
+${st.rows.length ? `<table><tr><th>이름</th><th>캠프</th>${cols.map((s) => `<th>${s.name}</th>`).join('')}<th>경고</th><th></th></tr>${rows}</table>
+<button data-act="clearAll">전체 삭제</button>` : ''}
+${log.length ? `<details><summary>가져오기 기록</summary><pre>${esc(log.slice(-40).join('\n'))}</pre></details>` : ''}`;
 }
 
 // ---------- 3. 수동 채점 ----------
@@ -121,25 +128,27 @@ function manual() {
 ${wrong.map(([, v]) => `<tr><td class="l">${esc(v.raw)}</td><td>${v.count}명</td><td><button data-act="accept" data-s="${s.id}" data-n="${q.n}" data-raw="${esc(v.raw)}">정답 인정</button></td></tr>`).join('')}</table></details>`);
     }
   }
-  return `<p>서술형 점수를 직접 입력하고, 단답 오답 중 정답으로 인정할 표기를 골라 추가합니다. 점수는 입력 즉시 저장됩니다.</p>${out.join('') || '<p class="mut">검토할 항목이 없습니다.</p>'}`;
+  return guide('③ 서술형 점수를 주세요.', '서술형은 점수 입력, 단답은 오답 중 정답으로 인정할 표기를 눌러 추가합니다. (건너뛰어도 됩니다)') + (out.join('') || '<p class="mut">검토할 항목이 없습니다.</p>');
 }
 
 // ---------- 4. 성적표 ----------
 function report() {
   const st = stats(), common = S.config.subjects.filter((s) => s.group === 'common');
-  const th = common.map((s) => `<th colspan="4">${s.name}</th>`).join('');
+  const sels = S.config.subjects.filter((s) => s.group === 'select' && st.subjects[s.id].n > 0);
+  const cols = showStd ? 4 : 1, rs = showStd ? 2 : 1;
+  const head = `<tr><th rowspan="${rs}">이름</th><th rowspan="${rs}">캠프</th>${common.map((s) => `<th colspan="${cols}">${s.name}</th>`).join('')}${sels.map((s) => `<th rowspan="${rs}">${s.name}<br><small>선택</small></th>`).join('')}<th rowspan="${rs}">총점</th><th rowspan="${rs}">순위</th><th rowspan="${rs}">백분위</th><th rowspan="${rs}">비고</th></tr>`
+    + (showStd ? `<tr>${common.map(() => '<th>원점수</th><th>표준</th><th>백분위</th><th>등급</th>').join('')}</tr>` : '');
   const rows = [...st.rows].sort((a, b) => a.res.rank - b.res.rank).map((r) => `<tr><td class="l">${esc(r.name)}</td><td>${r.res.camp || '-'}</td>
-${common.map((s) => { const o = r.res.subjects[s.id]; return o.taken ? `<td>${o.score}</td><td>${f1(o.std)}</td><td>${f1(o.pct)}</td><td>${o.grade}</td>` : '<td colspan="4" class="mut">미응시</td>'; }).join('')}
-${S.config.subjects.filter((s) => s.group === 'select').map((s) => `<td>${r.res.subjects[s.id].taken ? r.res.subjects[s.id].score : ''}</td>`).join('')}
+${common.map((s) => { const o = r.res.subjects[s.id]; return !o.taken ? `<td colspan="${cols}" class="mut">미응시</td>` : showStd ? `<td>${o.score}</td><td>${f1(o.std)}</td><td>${f1(o.pct)}</td><td>${o.grade}</td>` : `<td>${o.score}</td>`; }).join('')}
+${sels.map((s) => `<td>${r.res.subjects[s.id].taken ? r.res.subjects[s.id].score : ''}</td>`).join('')}
 <td><b>${r.res.total}</b></td><td>${r.res.rank}</td><td>${f1(r.res.pct)}</td>
 <td class="bad">${r.res.pending ? `미채점 ${r.res.pending}` : ''} ${esc(r.res.flags.join(' / '))}</td></tr>`).join('');
-  const sub = `<tr><th rowspan="2">이름</th><th rowspan="2">캠프</th>${th}<th colspan="3">선택(참고)</th><th rowspan="2" colspan="4">총점 · 순위 · 백분위 · 경고</th></tr>
-<tr>${common.map(() => '<th>원점수</th><th>표준</th><th>백분위</th><th>등급</th>').join('')}${S.config.subjects.filter((s) => s.group === 'select').map((s) => `<th>${s.name}</th>`).join('')}</tr>`;
-  const detail = sel && st.rows.find((r) => r.name === sel);
-  return `<p><button data-act="exportXlsx">결과 엑셀로 내보내기</button> <span class="mut">총점 = 공통 3영역 합 (선택영역은 보류, 참고 표시)</span></p>
-<table>${sub}${rows}</table>
-<p>개인 상세: <select id="selStudent"><option value="">선택</option>${st.rows.map((r) => `<option ${r.name === sel ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></p>
-${detail ? S.config.subjects.map((s) => { const o = detail.res.subjects[s.id]; if (!o.taken) return ''; return `<details open><summary>${s.name} ${o.score}/${o.max}</summary><table><tr>${Object.entries(o.detail).map(([n, d]) => `<th>${n}</th>`).join('')}</tr>
+  const who = sel && st.rows.find((r) => r.name === sel);
+  return guide('④ 채점 결과입니다.', '총점 = 공통 3영역 합. 아래에서 이름을 고르면 문항별 정오표가 나옵니다.')
+    + `<p><button data-act="exportXlsx">엑셀로 내보내기</button> <label><input type="checkbox" id="showStd" ${showStd ? 'checked' : ''}> 표준점수·백분위·등급도 보기</label></p>
+<table>${head}${rows}</table>
+<p>개인 상세: <select id="selStudent"><option value="">이름 선택</option>${st.rows.map((r) => `<option ${r.name === sel ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select></p>
+${who ? S.config.subjects.map((s) => { const o = who.res.subjects[s.id]; if (!o.taken) return ''; return `<details open><summary>${s.name} ${o.score}/${o.max}</summary><table><tr>${Object.keys(o.detail).map((n) => `<th>${n}</th>`).join('')}</tr>
 <tr>${Object.values(o.detail).map((d) => `<td class="${d.pending ? 'mut' : d.ok ? 'ok' : 'bad'}">${d.pending ? '…' : d.pts}</td>`).join('')}</tr></table></details>`; }).join('') : ''}`;
 }
 
@@ -154,14 +163,18 @@ function items() {
   if (qSort) qs.sort((a, b) => b.v.wrongRate - a.v.wrongRate);
   const rows = qs.map(({ q, v }) => `<tr><td>${q.n}</td><td>${TYPES[q.type]}</td><td>${q.pts}</td><td>${esc(q.ans)}</td><td>${v.att}</td><td>${f1((1 - v.wrongRate) * 100)}%</td><td class="${v.wrongRate >= 0.6 ? 'bad' : ''}">${f1(v.wrongRate * 100)}%</td>
 <td class="l">${Object.entries(v.dist).sort((a, b) => b[1].count - a[1].count).slice(0, 6).map(([k, d]) => `${q.type === 'short' || q.type === 'essay' ? esc(d.raw || k) : k}:${d.count}`).join(' · ')}</td></tr>`).join('');
-  return `<p><button data-act="exportXlsx">결과 엑셀로 내보내기</button></p>
+  return guide('⑤ 문항·영역 통계입니다.', '오답률 60% 이상 문항은 빨간색입니다. 응답 분포는 "선택지:인원"입니다.')
+    + `<p><button data-act="exportXlsx">엑셀로 내보내기</button></p>
+<h3>문항별 분석 <select id="qSubj">${S.config.subjects.map((x) => `<option value="${x.id}" ${x.id === qSubj ? 'selected' : ''}>${x.name}</option>`).join('')}</select>
+<button data-act="sort">${qSort ? '번호순으로' : '오답률순으로'}</button></h3>
+<table><tr><th>번호</th><th>유형</th><th>배점</th><th>정답</th><th>응시</th><th>정답률</th><th>오답률</th><th>응답 분포</th></tr>${rows}</table>
 <h3>영역별 통계</h3><table><tr><th>영역</th><th>응시</th><th>평균</th><th>표준편차</th><th>최고</th><th>최저</th></tr>${ss}</table>
 <h3>캠프별 총점 평균</h3><table><tr><th>캠프</th><th>인원</th><th>평균</th></tr>${camps}</table>
-<h3>총점 분포</h3><table>${hist}</table>
-<h3>문항별 분석 <select id="qSubj">${S.config.subjects.map((x) => `<option value="${x.id}" ${x.id === qSubj ? 'selected' : ''}>${x.name}</option>`).join('')}</select>
-<button data-act="sort">${qSort ? '번호순' : '오답률순'}</button></h3>
-<table><tr><th>번호</th><th>유형</th><th>배점</th><th>정답</th><th>응시</th><th>정답률</th><th>오답률</th><th>응답 분포 (상위)</th></tr>${rows}</table>`;
+<h3>총점 분포</h3><table>${hist}</table>`;
 }
+
+document.addEventListener('dragover', (e) => e.preventDefault());
+document.addEventListener('drop', (e) => { e.preventDefault(); if (tab === 'import') importFiles([...e.dataTransfer.files]); });
 
 // ---------- 동작 ----------
 const ACT = {
