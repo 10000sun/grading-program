@@ -46,9 +46,16 @@ const stats = () => Core.analyze(S.config, S.students, S.manual, S.campOf);
 
 // ---------- 탭 ----------
 const TABS = [['setup', '1. 정답 세팅'], ['import', '2. 답안 업로드'], ['manual', '3. 수동 채점'], ['report', '4. 성적표'], ['items', '5. 문항 분석'], ['admin', '6. 응시자 관리']];
+let lastTab = tab;
 function render() {
+  // 같은 탭을 다시 그릴 때는 펼쳐 둔 항목(details[data-k])과 스크롤 위치를 유지
+  const main = $('#main'), same = lastTab === tab, y = scrollY;
+  const keep = same ? [...main.querySelectorAll('details[data-k][open]')].map((d) => d.dataset.k) : [];
   $('#nav').innerHTML = TABS.map(([k, v]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${v}</button>`).join('');
-  $('#main').innerHTML = { setup, import: importTab, manual, report, items, admin }[tab]();
+  main.innerHTML = { setup, import: importTab, manual, report, items, admin }[tab]();
+  main.querySelectorAll('details[data-k]').forEach((d) => { if (keep.includes(d.dataset.k)) d.open = true; });
+  if (same) scrollTo(0, y);
+  lastTab = tab;
   netBadge();
 }
 document.addEventListener('click', (e) => {
@@ -92,12 +99,12 @@ function setup() {
 ${q.type === 'short' ? `<br><input class="a" value="${esc(q.half)}" data-s="${s.id}" data-n="${q.n}" data-f="half" placeholder="반만 인정할 표기 (쉼표로 구분)">
 <br><input class="a" value="${esc(q.wrong)}" data-s="${s.id}" data-n="${q.n}" data-f="wrong" placeholder="오답으로 확정한 표기 (검토 목록에서 숨김)">` : ''}</td></tr>`;
     }).join('');
-    return `<details><summary>${s.name} <span class="mut">${s.group === 'common' ? '공통' : '선택'} · ${s.questions.length}문항</span>
+    return `<details data-k="s-${s.id}"><summary>${s.name} <span class="mut">${s.group === 'common' ? '공통' : '선택'} · ${s.questions.length}문항</span>
  ${missing ? `<span class="badge bad">정답 ${missing}개 비어 있음</span>` : '<span class="badge ok">✓ 입력 완료</span>'}</summary>
 <table><tr><th>번호</th><th>구분</th><th>유형</th><th>배점</th><th>정답</th></tr>${rows}</table></details>`;
   }).join('');
   return guide('① 정답을 입력하세요.', '영역을 눌러 펼친 뒤 정답칸에 적습니다. 자동 저장됩니다.')
-    + `<details class="help"><summary>입력 방법 보기</summary><ul>
+    + `<details class="help" data-k="h-setup"><summary>입력 방법 보기</summary><ul>
 <li>객관식: <code>3</code> (숫자 1~5)</li><li>복수선택: <code>1,3</code> (순서 상관없음)</li>
 <li>단답: <code>정답,다른표기</code> (쉼표로 인정 답 여러 개) · 두 칸짜리 답은 <code>철수 영희</code>처럼 공백으로</li>
 <li>③ 수동 채점 탭의 단답 오답 검토: "정답 인정", "반만 인정"(배점의 절반), "오답 처리" 중 하나를 누르면 검토가 끝나 다시 뜨지 않습니다. 단답 문항 아래 칸에서 직접 고칠 수도 있습니다</li><li>서술(수동): 정답 없이 ③ 수동 채점 탭에서 점수를 직접 줍니다</li></ul></details>
@@ -150,13 +157,13 @@ ${cols.map((s) => `<td>${r.res.subjects[s.id].taken ? '✓' : ''}</td>`).join(''
 <td class="bad l">${esc(r.res.flags.join(' / '))}</td><td><button data-act="del" data-name="${esc(r.name)}">삭제</button></td></tr>`).join('');
   return guide('② 구글폼 응답 엑셀을 올리세요.', '파일 하나에 시트가 여러 개여도, 영역별 파일 여러 개여도 됩니다. 성명 열이 이름이고, 영역은 시트 이름·파일 이름·배점으로 자동 인식합니다.')
     + `<label class="drop">📂 엑셀 파일을 여기에 끌어다 놓거나 클릭해서 선택 (여러 개 가능)<input type="file" id="files" multiple accept=".xlsx,.xls,.csv" hidden></label>
-<details class="help"><summary>영역이 인식되지 않을 때</summary>올리는 파일의 영역을 직접 지정:
+<details class="help" data-k="h-import"><summary>영역이 인식되지 않을 때</summary>올리는 파일의 영역을 직접 지정:
 <select id="defSubj"><option value="">(선택 안 함)</option>${S.config.subjects.map((s) => `<option value="${s.id}">${s.name}</option>`).join('')}</select></details>
 <h3>총 응시자 ${st.rows.length}명</h3>
 <p class="mut">${cols.map((s) => `${s.name} ${st.subjects[s.id].n}명`).join(' · ')}<br>캠프별 ${Object.entries(st.camps).map(([c, v]) => `${c} ${v.n}명`).join(' · ') || '-'}</p>
 ${st.rows.length ? `<table><tr><th>이름</th><th>캠프</th>${cols.map((s) => `<th>${s.name}</th>`).join('')}<th>경고</th><th></th></tr>${rows}</table>
 <button data-act="clearAll">전체 삭제</button>` : ''}
-${log.length ? `<details><summary>가져오기 기록</summary><pre>${esc(log.slice(-40).join('\n'))}</pre></details>` : ''}`;
+${log.length ? `<details data-k="log"><summary>가져오기 기록</summary><pre>${esc(log.slice(-40).join('\n'))}</pre></details>` : ''}`;
 }
 
 // ---------- 3. 수동 채점 ----------
@@ -168,13 +175,13 @@ function manual() {
   for (const s of S.config.subjects) for (const q of s.questions) {
     if (q.type === 'essay') {
       const rows = st.rows.map((r) => ({ r, d: r.res.subjects[s.id].detail[q.n] })).filter((x) => x.d && !Core.blank(x.d.raw));
-      if (rows.length) out.push(`<details><summary>${s.name} ${q.n}번 (서술, ${q.pts}점) <span class="mut">${rows.filter((x) => x.d.pending).length}건 미채점</span> ${refShort(q)}</summary>
+      if (rows.length) out.push(`<details data-k="m-${s.id}-${q.n}"><summary>${s.name} ${q.n}번 (서술, ${q.pts}점) <span class="mut">${rows.filter((x) => x.d.pending).length}건 미채점</span> ${refShort(q)}</summary>
 ${refBox(q)}<table>${rows.map(({ r, d }) => `<tr><td class="l">${esc(r.name)}</td><td class="l" style="white-space:normal;max-width:520px">${esc(d.raw)}</td>
 <td><input class="n" type="number" min="0" max="${q.pts}" step="0.5" value="${S.manual[r.name]?.[s.id]?.[q.n] ?? ''}" data-mp='${esc(JSON.stringify([s.id, q.n, r.name]))}'> / ${q.pts}</td></tr>`).join('')}</table></details>`);
     } else if (q.type === 'short') {
       const done = new Set(String(q.wrong || '').split(',').map(Core.normShort)); // 정답/반만/오답 처리한 표기는 다시 안 뜸
       const wrong = Object.entries(st.questions[s.id][q.n].dist).filter(([k, v]) => !v.ok && !v.half && !done.has(k) && k !== '무응답').sort((a, b) => b[1].count - a[1].count);
-      if (wrong.length) out.push(`<details><summary>${s.name} ${q.n}번 단답 오답 검토 <span class="mut">(${wrong.length}종)</span> ${refShort(q)}</summary>
+      if (wrong.length) out.push(`<details data-k="m-${s.id}-${q.n}"><summary>${s.name} ${q.n}번 단답 오답 검토 <span class="mut">(${wrong.length}종)</span> ${refShort(q)}</summary>
 ${refBox(q)}<table>
 ${wrong.map(([, v]) => `<tr><td class="l">${esc(v.raw)}</td><td>${v.count}명</td><td><button data-act="accept" data-s="${s.id}" data-n="${q.n}" data-raw="${esc(v.raw)}">정답 인정</button> <button data-act="half" data-s="${s.id}" data-n="${q.n}" data-raw="${esc(v.raw)}">반만 인정</button> <button data-act="wrong" data-s="${s.id}" data-n="${q.n}" data-raw="${esc(v.raw)}">오답 처리</button></td></tr>`).join('')}</table></details>`);
     }
@@ -253,7 +260,7 @@ ${cols.map((s) => `<td>${r.res.subjects[s.id].taken ? '✓' : ''}</td>`).join(''
     + `<h3>이름 병합</h3>
 <textarea id="mergeText" rows="4" cols="40" placeholder="한 줄에 하나씩&#10;빡통=김빡통&#10;김봉팔님=김봉팔"></textarea><br>
 <button data-act="merge">병합</button>
-<details class="help"><summary>병합 규칙</summary><ul><li><code>A=B</code> 는 A의 답안을 B로 옮기고 A는 없앱니다. B가 없는 이름이면 이름 변경이 됩니다.</li>
+<details class="help" data-k="h-admin"><summary>병합 규칙</summary><ul><li><code>A=B</code> 는 A의 답안을 B로 옮기고 A는 없앱니다. B가 없는 이름이면 이름 변경이 됩니다.</li>
 <li>같은 영역 답안이 A와 B 양쪽에 있으면 B의 것을 쓰고 A의 것은 버립니다.</li>
 <li>병합한 이름은 기억해 두어서, 나중에 A 이름으로 엑셀을 다시 올려도 자동으로 B가 됩니다.</li></ul></details>
 ${als.length ? `<p class="mut">병합해 둔 이름: ${als.map(([k, v]) => `${esc(k)} → ${esc(v)}`).join(' · ')}</p>` : ''}
