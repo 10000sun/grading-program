@@ -74,6 +74,12 @@ assert.equal(C.scoreStudent(cfg, { ...two, camp: '없는캠프' }).camp, auto.ca
 // 캠프 영역을 안 푼 사람도 수동 지정하면 캠프별 집계에 들어감
 const noCamp = C.analyze(cfg, { D: { answers: { history: { 1: '3' } } } }, {}, { D: '여백' });
 assert.deepEqual([noCamp.rows[0].res.camp, Object.keys(noCamp.camps)], ['여백', ['여백']]);
+// 리뷰 수정: 서술 점수는 음수 불가, 이상한 캠프 이름(프로토타입 속성)은 무시, 선택영역만 푼 사람은 순위·백분위 집계에서 제외
+assert.equal(C.grade(essay, '답', -5).pts, 0);
+assert.equal(C.scoreStudent(cfg, { name: 'x', camp: 'constructor', answers: { camp: { 1: '1' } } }).camp, '여백');
+const coh = C.analyze(cfg, { 공통: { answers: { history: { 1: '3' } } }, 선택만: { answers: { art: { 1: '5' } } } }, {});
+const byName = Object.fromEntries(coh.rows.map((r) => [r.name, r.res]));
+assert.deepEqual([byName.공통.rank, byName.공통.pct, byName.선택만.rank, byName.선택만.pct, coh.totals.length], [1, 50, null, null, 1]);
 console.log('ok');
 
 // 기본 설정 점검: 서술 외에는 정답이 모두 있고 형식이 맞아야 함

@@ -1,7 +1,9 @@
 const KEY = 'evaSuneung.v1';
 const TYPES = { mc: '객관식', multi: '복수선택', short: '단답', essay: '서술(수동)' };
 const $ = (s) => document.querySelector(s);
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const own = (o, k) => Object.hasOwn(o || {}, k);
+const safe = (n) => (n in {} ? n + '_' : n); // 'constructor', '__proto__' 같은 이름은 객체 키로 쓰면 깨지므로 변형
 const f1 = (x) => (Math.round(x * 10) / 10).toFixed(1);
 
 let S = load(), tab = 'setup', log = [], sel = '', qSubj = 'history', qSort = false, showStd = false;
@@ -11,7 +13,7 @@ function load() {
 }
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {} };
 
-// ---------- 서버 동기화 (Cloudflare Pages Functions + D1). 서버가 없으면 이 브라우저에만 저장 ----------
+// ---------- 서버 동기화 (Cloudflare Workers + D1). 서버가 없으면 이 브라우저에만 저장 ----------
 let online = false;
 // github.io에서 열면 Cloudflare 서버 주소의 API를 사용 (같은 데이터 공유). Cloudflare 서버 주소.
 const API_BASE = /github\.io$/.test(location.hostname) ? 'https://grading-program.lws001108.workers.dev/' : '';
@@ -19,14 +21,17 @@ const api = (path, body) => fetch(API_BASE + 'api/' + path, body ? { method: 'PO
   .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
 const typing = () => { const a = document.activeElement; return a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.type !== 'file'; };
 const netBadge = () => { $('#total').textContent = `총 응시자 ${Object.keys(S.students).length}명`; $('#net').textContent = online ? '🟢 서버 연동 (모두 같은 화면)' : '⚠ 서버 연결 없음: 이 브라우저에만 저장'; };
+let busy = 0; // 서버로 보내는 중인 작업 수: 이 동안에는 서버 상태로 화면을 덮어쓰지 않음 (내 변경이 사라져 보이는 것 방지)
+const guard = async (fn) => { busy++; try { return await fn(); } finally { busy--; } };
 async function sync(force) {
+  if (busy) return;
   try {
     const { v } = await api('version');
     if (online && !force && v === S.ver) return;
     const j = await api('state');
-    if (online && typing()) return; // 입력 중에는 덮어쓰지 않고 다음 주기에 반영
+    if (busy || (online && typing())) return; // 저장 중이거나 입력 중에는 덮어쓰지 않고 다음 주기에 반영
     online = true;
-    if (!j.config || j.config.version !== DEFAULT_CONFIG.version) { // 서버에 정답 설정이 없거나 구버전이면 기본값으로 초기화
+    if (!j.config || !Array.isArray(j.config.subjects)) { // 서버에 정답 설정이 없을 때만 기본값으로 시작 (이후 정답 수정은 서버 값이 기준)
       j.config = structuredClone(DEFAULT_CONFIG);
       api('op', { type: 'setConfig', config: j.config }).then((r) => (S.ver = r.v)).catch(() => {});
     }
@@ -38,7 +43,12 @@ async function sync(force) {
 async function op(body) {
   save();
   if (!online) return;
-  try { const { v } = await api('op', body); if (v === S.ver + 1) S.ver = v; else await sync(true); } catch { online = false; netBadge(); }
+  let resync = false;
+  await guard(async () => {
+    try { const { v } = await api('op', body); if (v === S.ver + 1) S.ver = v; else resync = true; } // 그 사이 다른 사람이 바꿨으면 다시 불러옴
+    catch (e) { resync = true; alert(`서버에 저장하지 못했습니다 (${e.message}).\n화면을 서버 기준으로 다시 불러오니, 방금 한 작업을 다시 확인해 주세요.`); }
+  });
+  if (resync) await sync(true);
 }
 const subj = (id) => S.config.subjects.find((s) => s.id === id);
 const download = (name, blob) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); };
@@ -66,19 +76,25 @@ document.addEventListener('change', (e) => {
   const d = e.target.dataset;
   if (d.f) { // 정답 세팅 입력
     const q = subj(d.s).questions[d.n - 1];
-    q[d.f] = d.f === 'pts' ? Number(e.target.value) || 0 : e.target.value;
-    op({ type: 'setConfig', config: S.config }); if (d.f === 'type') render();
+    q[d.f] = d.f === 'pts' ? Math.min(Math.max(Number(e.target.value) || 0, 0), 100) : e.target.value;
+    op({ type: 'setQ', subject: d.s, n: Number(d.n), field: d.f, value: q[d.f] }); if (d.f === 'type') render();
   } else if (d.mp) { // 수동 점수
     const [s, n, name] = JSON.parse(d.mp);
     const m = ((S.manual[name] ||= {})[s] ||= {});
-    if (e.target.value === '') delete m[n]; else m[n] = Number(e.target.value);
-    op({ type: 'setManual', name, subject: s, n, pts: e.target.value === '' ? null : Number(e.target.value) });
+    const max = subj(s)?.questions[n - 1]?.pts ?? 100, v = e.target.value === '' ? null : Math.min(Math.max(Number(e.target.value) || 0, 0), max); // 0 ~ 배점으로 보정
+    if (v == null) delete m[n]; else m[n] = v;
+    e.target.value = v ?? '';
+    op({ type: 'setManual', name, subject: s, n, pts: v });
   } else if (d.camp !== undefined) { // 관리 탭: 캠프 수동 지정
     const v = e.target.value;
     if (v) (S.campOf ||= {})[d.camp] = v; else delete S.campOf?.[d.camp];
     op({ type: 'setCamp', name: d.camp, camp: v || null }); render();
   } else if (e.target.id === 'files') importFiles([...e.target.files]);
-  else if (e.target.id === 'cfgfile') e.target.files[0].text().then((t) => { S.config = JSON.parse(t); op({ type: 'setConfig', config: S.config }); render(); });
+  else if (e.target.id === 'cfgfile') e.target.files[0].text().then(async (t) => {
+    let cfg; try { cfg = JSON.parse(t); } catch { return alert('정답 파일이 올바른 JSON이 아닙니다.'); }
+    if (!Array.isArray(cfg?.subjects)) return alert('정답 파일 형식이 아닙니다.');
+    S.config = cfg; await op({ type: 'setConfig', config: cfg }); render();
+  });
   else if (e.target.id === 'selStudent') { sel = e.target.value; render(); }
   else if (e.target.id === 'showStd') { showStd = e.target.checked; render(); }
   else if (e.target.id === 'qSubj') { qSubj = e.target.value; render(); }
@@ -108,7 +124,7 @@ ${q.type === 'short' ? `<br><input class="a" value="${esc(q.half)}" data-s="${s.
 <li>객관식: <code>3</code> (숫자 1~5)</li><li>복수선택: <code>1,3</code> (순서 상관없음)</li>
 <li>단답: <code>정답,다른표기</code> (쉼표로 인정 답 여러 개) · 두 칸짜리 답은 <code>철수 영희</code>처럼 공백으로</li>
 <li>③ 수동 채점 탭의 단답 오답 검토: "정답 인정", "반만 인정"(배점의 절반), "오답 처리" 중 하나를 누르면 검토가 끝나 다시 뜨지 않습니다. 단답 문항 아래 칸에서 직접 고칠 수도 있습니다</li><li>서술(수동): 정답 없이 ③ 수동 채점 탭에서 점수를 직접 줍니다</li></ul></details>
-${body}<p><button data-act="cfgSave">정답 파일로 저장</button> <label class="btn">정답 파일 불러오기 <input type="file" id="cfgfile" accept=".json" hidden></label></p>`;
+${body}<p><button data-act="cfgSave">정답 파일로 저장</button> <label class="btn">정답 파일 불러오기 <input type="file" id="cfgfile" accept=".json" hidden></label> <button data-act="cfgReset">정답을 기본값으로 되돌리기</button></p>`;
 }
 
 // ---------- 2. 업로드 ----------
@@ -125,7 +141,8 @@ function readForm(ws, sn, fname, def) { // 영역 판별 우선순위: 직접 �
   const s = (def && subj(def)) || named(sn) || named(fname) || (best[0] === qs.length ? best[1] : null);
   return { s, sn, ni, qs, rows: rows.slice(1).filter((r) => String(r[ni]).trim()) };
 }
-async function importFiles(files) {
+const importFiles = (files) => guard(() => importFilesRun(files));
+async function importFilesRun(files) {
   const def = $('#defSubj')?.value, rows = [];
   for (const f of files) {
     try {
@@ -137,9 +154,9 @@ async function importFiles(files) {
         if (!form.s) { log.push(`${label}: 영역을 인식하지 못했습니다 (시트 이름에 영역명을 넣거나 "영역 직접 지정" 사용)`); continue; }
         const seen = {}; let dup = 0;
         for (const r of form.rows) { // 같은 이름이 여러 번 제출되면 마지막(최신) 응답 사용
-          const raw = String(r[form.ni]).trim().replace(/\s+/g, ' ').slice(0, 60), name = S.alias?.[raw] || raw; // 병합해 둔 이름은 대표 이름으로
+          const raw = safe(String(r[form.ni]).trim().replace(/\s+/g, ' ').slice(0, 60)), name = own(S.alias, raw) ? S.alias[raw] : raw; // 병합해 둔 이름은 대표 이름으로
           if (seen[name]) dup++; seen[name] = 1;
-          const answers = Object.fromEntries(form.qs.map((q) => [q.n, r[q.i]]));
+          const answers = Object.fromEntries(form.qs.map((q) => [q.n, String(r[q.i] ?? '').slice(0, 1000)])); // 답 하나는 1000자까지만 저장
           ((S.students[name] ||= { answers: {} }).answers)[form.s.id] = answers;
           rows.push({ name, subject: form.s.id, answers });
         }
@@ -149,6 +166,7 @@ async function importFiles(files) {
   }
   for (let i = 0; i < rows.length; i += 50) await op({ type: 'putAnswers', rows: rows.slice(i, i + 50) });
   save(); render();
+  if (online) await sync(true); // 서버가 이름을 거부한 행이 있으면 화면도 서버 기준으로 맞춤
 }
 function importTab() {
   const st = stats(), cols = S.config.subjects.filter((s) => s.group === 'common' || st.subjects[s.id].n > 0);
@@ -196,10 +214,10 @@ function report() {
   const cols = showStd ? 4 : 1, rs = showStd ? 2 : 1;
   const head = `<tr><th rowspan="${rs}">이름</th><th rowspan="${rs}">캠프</th>${common.map((s) => `<th colspan="${cols}">${s.name}</th>`).join('')}${sels.map((s) => `<th rowspan="${rs}">${s.name}<br><small>선택</small></th>`).join('')}<th rowspan="${rs}">총점</th><th rowspan="${rs}">순위</th><th rowspan="${rs}">백분위</th><th rowspan="${rs}">비고</th></tr>`
     + (showStd ? `<tr>${common.map(() => '<th>원점수</th><th>표준</th><th>백분위</th><th>등급</th>').join('')}</tr>` : '');
-  const rows = [...st.rows].sort((a, b) => a.res.rank - b.res.rank).map((r) => `<tr><td class="l">${esc(r.name)}</td><td>${r.res.camp || '-'}</td>
+  const rows = [...st.rows].sort((a, b) => (a.res.rank ?? 1e9) - (b.res.rank ?? 1e9)).map((r) => `<tr><td class="l">${esc(r.name)}</td><td>${r.res.camp || '-'}</td>
 ${common.map((s) => { const o = r.res.subjects[s.id]; return !o.taken ? `<td colspan="${cols}" class="mut">미응시</td>` : showStd ? `<td>${o.score}</td><td>${f1(o.std)}</td><td>${f1(o.pct)}</td><td>${o.grade}</td>` : `<td>${o.score}</td>`; }).join('')}
 ${sels.map((s) => `<td>${r.res.subjects[s.id].taken ? r.res.subjects[s.id].score : ''}</td>`).join('')}
-<td><b>${r.res.total}</b></td><td>${r.res.rank}</td><td>${f1(r.res.pct)}</td>
+<td><b>${r.res.total}</b></td><td>${r.res.rank ?? '-'}</td><td>${r.res.pct == null ? '-' : f1(r.res.pct)}</td>
 <td class="bad">${r.res.pending ? `미채점 ${r.res.pending}` : ''} ${esc(r.res.flags.join(' / '))}</td></tr>`).join('');
   const who = sel && st.rows.find((r) => r.name === sel);
   return guide('④ 채점 결과입니다.', '총점 = 공통 3영역 합. 아래에서 이름을 고르면 문항별 정오표가 나옵니다.')
@@ -220,7 +238,7 @@ function items() {
   let qs = s.questions.map((q) => ({ q, v: st.questions[s.id][q.n] }));
   if (qSort) qs.sort((a, b) => b.v.wrongRate - a.v.wrongRate);
   const rows = qs.map(({ q, v }) => `<tr><td>${q.n}</td><td>${TYPES[q.type]}</td><td>${q.pts}</td><td>${esc(q.ans)}</td><td>${v.att}</td><td>${f1((1 - v.wrongRate) * 100)}%</td><td class="${v.wrongRate >= 0.6 ? 'bad' : ''}">${f1(v.wrongRate * 100)}%</td>
-<td class="l">${Object.entries(v.dist).sort((a, b) => b[1].count - a[1].count).slice(0, 6).map(([k, d]) => `${q.type === 'short' || q.type === 'essay' ? esc(d.raw || k) : k}:${d.count}`).join(' · ')}</td></tr>`).join('');
+<td class="l">${Object.entries(v.dist).sort((a, b) => b[1].count - a[1].count).slice(0, 6).map(([k, d]) => `${q.type === 'short' || q.type === 'essay' ? esc(d.raw || k) : esc(k)}:${d.count}`).join(' · ')}</td></tr>`).join('');
   return guide('⑤ 문항·영역 통계입니다.', '오답률 60% 이상 문항은 빨간색입니다. 응답 분포는 "선택지:인원"입니다.')
     + `<p><button data-act="exportXlsx">엑셀로 내보내기</button></p>
 <h3>문항별 분석 <select id="qSubj">${S.config.subjects.map((x) => `<option value="${x.id}" ${x.id === qSubj ? 'selected' : ''}>${x.name}</option>`).join('')}</select>
@@ -238,7 +256,7 @@ document.addEventListener('drop', (e) => { e.preventDefault(); if (tab === 'impo
 function mark(d, field) {
   const q = subj(d.s).questions[d.n - 1], raw = d.raw.replace(/,/g, ' ');
   q[field] = q[field] ? `${q[field]},${raw}` : raw;
-  op({ type: 'setConfig', config: S.config }); render();
+  op({ type: 'appendQ', subject: d.s, n: Number(d.n), field, raw }); render();
 }
 
 // ---------- 6. 응시자 관리 ----------
@@ -275,28 +293,31 @@ document.addEventListener('input', (e) => {
 
 // ---------- 동작 ----------
 const ACT = {
+  cfgReset: async () => { if (!confirm('모든 문항의 정답·유형·배점과 인정/반만/오답 처리 내용을 기본값으로 되돌립니다. 계속할까요?')) return; S.config = structuredClone(DEFAULT_CONFIG); await op({ type: 'setConfig', config: S.config }); render(); },
   cfgSave: () => download('정답설정.json', new Blob([JSON.stringify(S.config, null, 1)], { type: 'application/json' })),
-  del: (d) => { delete S.students[d.name]; delete S.manual[d.name]; delete S.campOf?.[d.name]; op({ type: 'delStudent', name: d.name }); render(); },
-  clearAll: () => { if (confirm('응시자 데이터를 모두 삭제할까요?')) { S.students = {}; S.manual = {}; S.alias = {}; S.campOf = {}; op({ type: 'clearAll' }); render(); } },
+  del: (d) => { if (!confirm(`${d.name} 응시자의 답안을 모두 삭제할까요?`)) return; delete S.students[d.name]; delete S.manual[d.name]; delete S.campOf?.[d.name]; op({ type: 'delStudent', name: d.name }); render(); },
+  clearAll: () => { if (prompt('응시자 데이터를 모두 삭제합니다. 되돌릴 수 없습니다.\n계속하려면 "삭제"라고 입력하세요.') === '삭제') { S.students = {}; S.manual = {}; S.alias = {}; S.campOf = {}; op({ type: 'clearAll' }); render(); } },
   merge: async () => {
     const pairs = [];
     for (const line of $('#mergeText').value.split('\n')) {
       const i = line.indexOf('=');
       if (i < 0) continue;
-      const from = line.slice(0, i).trim().replace(/\s+/g, ' '), to0 = line.slice(i + 1).trim().replace(/\s+/g, ' ');
+      const from = safe(line.slice(0, i).trim().replace(/\s+/g, ' ')), to0 = safe(line.slice(i + 1).trim().replace(/\s+/g, ' '));
       if (from && to0 && from !== to0 && from.length <= 60 && to0.length <= 60) pairs.push([from, to0]);
     }
     if (!pairs.length) return alert('병합할 줄이 없습니다. 예) 빡통=김빡통');
     const lines = pairs.map(([f, t]) => {
-      const lost = Object.keys(S.students[f]?.answers || {}).filter((sid) => S.students[S.alias?.[t] || t]?.answers?.[sid]).map((sid) => subj(sid)?.name);
+      const lost = Object.keys(S.students[f]?.answers || {}).filter((sid) => S.students[own(S.alias, t) ? S.alias[t] : t]?.answers?.[sid]).map((sid) => subj(sid)?.name);
       return `${f} → ${t}${S.students[f] ? '' : ' (현재 없는 이름: 별칭만 등록)'}${lost.length ? ` [${lost.join(', ')} 답안은 ${t}의 것 유지]` : ''}`;
     });
     if (!confirm(`${pairs.length}건을 병합할까요?\n\n${lines.join('\n')}`)) return;
-    for (const [from, to0] of pairs) { // 순서대로 하나씩 (앞 줄 병합 결과가 뒷 줄의 대표 이름에 반영되도록)
-      const to = S.alias?.[to0] || to0;
-      if (from === to) continue;
-      Core.mergeInto(S, from, to); await op({ type: 'merge', from, to });
-    }
+    await guard(async () => {
+      for (const [from, to0] of pairs) { // 순서대로 하나씩 (앞 줄 병합 결과가 뒷 줄의 대표 이름에 반영되도록)
+        const to = own(S.alias, to0) ? S.alias[to0] : to0;
+        if (from === to) continue;
+        Core.mergeInto(S, from, to); await op({ type: 'merge', from, to });
+      }
+    });
     render();
   },
   half: (d) => mark(d, 'half'),
@@ -305,10 +326,10 @@ const ACT = {
   sort: () => { qSort = !qSort; render(); },
   exportXlsx: () => {
     const st = stats(), wb = XLSX.utils.book_new();
-    const rep = st.rows.sort((a, b) => a.res.rank - b.res.rank).map((r) => {
+    const rep = [...st.rows].sort((a, b) => (a.res.rank ?? 1e9) - (b.res.rank ?? 1e9)).map((r) => {
       const o = { 이름: r.name, 캠프: r.res.camp || '' };
       for (const s of S.config.subjects) { const x = r.res.subjects[s.id]; if (x.taken) { o[s.name] = x.score; o[s.name + ' 표준점수'] = +f1(x.std); o[s.name + ' 백분위'] = +f1(x.pct); o[s.name + ' 등급'] = x.grade; } }
-      return { ...o, 총점: r.res.total, 순위: r.res.rank, 백분위: +f1(r.res.pct), 경고: r.res.flags.join(' / ') };
+      return { ...o, 총점: r.res.total, 순위: r.res.rank ?? '', 백분위: r.res.pct == null ? '' : +f1(r.res.pct), 경고: r.res.flags.join(' / ') };
     });
     const qrows = S.config.subjects.flatMap((s) => s.questions.map((q) => { const v = st.questions[s.id][q.n]; return { 영역: s.name, 번호: q.n, 유형: TYPES[q.type], 배점: q.pts, 정답: q.ans, 응시: v.att, 정답률: +((1 - v.wrongRate) * 100).toFixed(1), 오답률: +(v.wrongRate * 100).toFixed(1) }; }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rep), '성적표');

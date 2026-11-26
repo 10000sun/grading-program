@@ -11,7 +11,7 @@
   function grade(q, raw, manualPts) {
     if (q.type === 'essay') {
       if (blank(raw)) return { ok: false, pts: 0, pending: false };
-      const pts = manualPts == null ? 0 : Math.min(Number(manualPts) || 0, q.pts);
+      const pts = manualPts == null ? 0 : Math.max(0, Math.min(Number(manualPts) || 0, q.pts));
       return { ok: manualPts != null && pts >= q.pts, pts, pending: manualPts == null };
     }
     let ok = false;
@@ -53,7 +53,7 @@
       const ans = (st.answers || {})[s.id] || {};
       let camp = null;
       if (s.camps) {
-        const d = detectCamp(s, ans), forced = s.camps[st.camp] ? st.camp : null; // st.camp: 관리 탭에서 수동 지정한 캠프
+        const d = detectCamp(s, ans), forced = Object.hasOwn(s.camps, st.camp) ? st.camp : null; // st.camp: 관리 탭에서 수동 지정한 캠프
         camp = out.camp = forced || d.camp; out.campForced = !!forced;
         if (!forced && d.flag && Object.values(ans).some((v) => !blank(v))) out.flags.push(d.flag);
       }
@@ -78,8 +78,11 @@
 
   function analyze(cfg, students, manual, campOf) {
     const rows = Object.entries(students).map(([name, st]) => ({ name, res: scoreStudent(cfg, { ...st, name, camp: campOf?.[name] }, manual) }));
-    const stats = { rows, subjects: {}, questions: {}, camps: {}, totals: rows.map((r) => r.res.total) };
+    // 순위·백분위는 공통 영역을 하나라도 푼 응시자끼리만 비교 (선택영역만 푼 사람의 0점이 섞이지 않게)
+    const common = (r) => cfg.subjects.some((s) => s.group === 'common' && r.res.subjects[s.id].taken);
+    const stats = { rows, subjects: {}, questions: {}, camps: {}, totals: rows.filter(common).map((r) => r.res.total) };
     for (const r of rows) {
+      if (!common(r)) { r.res.rank = r.res.pct = null; continue; }
       r.res.rank = 1 + stats.totals.filter((t) => t > r.res.total).length;
       r.res.pct = pctile(stats.totals, r.res.total);
     }
