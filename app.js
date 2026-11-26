@@ -52,13 +52,13 @@ function setup() {
 <td><select data-s="${s.id}" data-n="${q.n}" data-f="type">${Object.entries(TYPES).map(([k, v]) => `<option value="${k}" ${q.type === k ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
 <td><input class="n" type="number" min="0" value="${q.pts}" data-s="${s.id}" data-n="${q.n}" data-f="pts"></td>
 <td class="l"><input class="a" value="${esc(q.ans)}" ${q.type === 'essay' ? 'disabled placeholder="수동 채점"' : ''} data-s="${s.id}" data-n="${q.n}" data-f="ans"
- placeholder="${{ mc: '1~5', multi: '1,3', short: '정답1|정답2' }[q.type] || ''}"></td></tr>`;
+ placeholder="${{ mc: '1~5', multi: '1,3', short: '정답1,정답2' }[q.type] || ''}"></td></tr>`;
     }).join('');
     return `<details ${missing ? 'open' : ''}><summary>${s.name} <span class="mut">(${s.group === 'common' ? '공통' : '선택'} · ${s.questions.length}문항 · 만점 ${s.camps ? '60(캠프별)' : s.questions.reduce((a, q) => a + q.pts, 0)})</span>
  ${missing ? `<span class="bad">정답 미입력 ${missing}</span>` : '<span class="ok">입력 완료</span>'}</summary>
-<table><tr><th>번호</th><th>구분</th><th>유형</th><th>배점</th><th>정답 (단답은 | 로 복수 인정답)</th></tr>${rows}</table></details>`;
+<table><tr><th>번호</th><th>구분</th><th>유형</th><th>배점</th><th>정답 (단답은 , 로 복수 인정답)</th></tr>${rows}</table></details>`;
   }).join('');
-  return `<p>객관식은 1~5, 복수선택은 <code>1,3</code>, 단답은 <code>정답|다른표기</code>로 입력합니다. 입력은 이 브라우저에 자동 저장됩니다.</p>
+  return `<p>객관식은 1~5, 복수선택은 <code>1,3</code>, 단답은 <code>정답,다른표기</code>로 입력합니다. 입력은 이 브라우저에 자동 저장됩니다.</p>
 <p><button data-act="cfgSave">설정 파일로 저장</button> <label>불러오기 <input type="file" id="cfgfile" accept=".json"></label></p>${body}`;
 }
 
@@ -168,7 +168,7 @@ const ACT = {
   cfgSave: () => download('정답설정.json', new Blob([JSON.stringify(S.config, null, 1)], { type: 'application/json' })),
   del: (d) => { delete S.students[d.name]; save(); render(); },
   clearAll: () => { if (confirm('응시자 데이터를 모두 삭제할까요?')) { S.students = {}; S.manual = {}; save(); render(); } },
-  accept: (d) => { const q = subj(d.s).questions[d.n - 1]; q.ans = q.ans ? `${q.ans}|${d.raw}` : d.raw; save(); render(); },
+  accept: (d) => { const q = subj(d.s).questions[d.n - 1]; const raw = d.raw.replace(/,/g, ' '); q.ans = q.ans ? `${q.ans},${raw}` : raw; save(); render(); },
   sort: () => { qSort = !qSort; render(); },
   exportXlsx: () => {
     const st = stats(), wb = XLSX.utils.book_new();

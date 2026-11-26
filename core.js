@@ -18,7 +18,7 @@
     if (!blank(raw)) {
       if (q.type === 'mc') ok = !!q.ans && normMc(raw) === normMc(q.ans);
       else if (q.type === 'multi') ok = !!q.ans && normMulti(raw) === normMulti(q.ans);
-      else ok = String(q.ans || '').split('|').map(normShort).filter(Boolean).includes(normShort(raw));
+      else ok = String(q.ans || '').split(',').map(normShort).filter(Boolean).includes(normShort(raw));
     }
     return { ok, pts: ok ? q.pts : 0, pending: false };
   }
