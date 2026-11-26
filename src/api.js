@@ -10,6 +10,7 @@ const init = (db) => (ready ||= db.batch([
   db.prepare('CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)'),
   db.prepare('CREATE TABLE IF NOT EXISTS answers (name TEXT, subject TEXT, data TEXT, PRIMARY KEY (name, subject))'),
   db.prepare('CREATE TABLE IF NOT EXISTS alias (src TEXT PRIMARY KEY, dst TEXT)'),
+  db.prepare('CREATE TABLE IF NOT EXISTS camp_of (name TEXT PRIMARY KEY, camp TEXT)'),
   db.prepare('CREATE TABLE IF NOT EXISTS manual (name TEXT, subject TEXT, q INTEGER, pts REAL, PRIMARY KEY (name, subject, q))'),
 ]).catch((e) => { ready = null; throw e; }));
 
@@ -17,18 +18,21 @@ const ver = async (db) => Number((await db.prepare("SELECT v FROM meta WHERE k='
 const bump = (db) => db.prepare("INSERT INTO meta (k, v) VALUES ('ver', '1') ON CONFLICT(k) DO UPDATE SET v = CAST(v AS INTEGER) + 1");
 
 async function state(db) {
-  const [cfg, ans, man, als, v] = await Promise.all([
+  const [cfg, ans, man, als, cmp, v] = await Promise.all([
     db.prepare("SELECT v FROM meta WHERE k='config'").first('v'),
     db.prepare('SELECT name, subject, data FROM answers').all(),
     db.prepare('SELECT name, subject, q, pts FROM manual').all(),
     db.prepare('SELECT src, dst FROM alias').all(),
+    db.prepare('SELECT name, camp FROM camp_of').all(),
     ver(db),
   ]);
   const students = {}, manual = {}, alias = {};
   for (const r of als.results) alias[r.src] = r.dst;
+  const campOf = {};
+  for (const r of cmp.results) campOf[r.name] = r.camp;
   for (const r of ans.results) ((students[r.name] ||= { answers: {} }).answers)[r.subject] = JSON.parse(r.data);
   for (const r of man.results) ((manual[r.name] ||= {})[r.subject] ||= {})[r.q] = r.pts;
-  return { config: cfg ? JSON.parse(cfg) : null, students, manual, alias, ver: v };
+  return { config: cfg ? JSON.parse(cfg) : null, students, manual, alias, campOf, ver: v };
 }
 
 const okName = (s) => typeof s === 'string' && s.length > 0 && s.length <= 60;
@@ -54,7 +58,11 @@ async function apply(db, op) {
     else throw bad('pts');
   } else if (op?.type === 'delStudent') {
     if (!okName(op.name)) throw bad('name');
-    st.push(db.prepare('DELETE FROM answers WHERE name = ?').bind(op.name), db.prepare('DELETE FROM manual WHERE name = ?').bind(op.name));
+    st.push(db.prepare('DELETE FROM answers WHERE name = ?').bind(op.name), db.prepare('DELETE FROM manual WHERE name = ?').bind(op.name), db.prepare('DELETE FROM camp_of WHERE name = ?').bind(op.name));
+  } else if (op?.type === 'setCamp') { // 캠프 수동 지정 (camp가 null이면 자동 판별로 되돌림)
+    if (!okName(op.name) || !(op.camp == null || (typeof op.camp === 'string' && op.camp.length > 0 && op.camp.length <= 20))) throw bad('camp');
+    st.push(op.camp == null ? db.prepare('DELETE FROM camp_of WHERE name = ?').bind(op.name)
+      : db.prepare('INSERT INTO camp_of (name, camp) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET camp = excluded.camp').bind(op.name, op.camp));
   } else if (op?.type === 'merge') { // from → to. 같은 영역 답안이 겹치면 to의 것을 유지
     if (!okName(op.from) || !okName(op.to) || op.from === op.to) throw bad('merge');
     const f = op.from, to = op.to;
@@ -64,11 +72,13 @@ async function apply(db, op) {
       db.prepare('DELETE FROM answers WHERE name = ?').bind(f),
       db.prepare('UPDATE OR IGNORE manual SET name = ? WHERE name = ?').bind(to, f),
       db.prepare('DELETE FROM manual WHERE name = ?').bind(f),
+      db.prepare('UPDATE OR IGNORE camp_of SET name = ? WHERE name = ?').bind(to, f),
+      db.prepare('DELETE FROM camp_of WHERE name = ?').bind(f),
       db.prepare('UPDATE alias SET dst = ? WHERE dst = ?').bind(to, f),
       db.prepare('INSERT INTO alias (src, dst) VALUES (?, ?) ON CONFLICT(src) DO UPDATE SET dst = excluded.dst').bind(f, to),
     );
   } else if (op?.type === 'clearAll') {
-    st.push(db.prepare('DELETE FROM answers'), db.prepare('DELETE FROM manual'), db.prepare('DELETE FROM alias'));
+    st.push(db.prepare('DELETE FROM answers'), db.prepare('DELETE FROM manual'), db.prepare('DELETE FROM alias'), db.prepare('DELETE FROM camp_of'));
   } else throw bad('op');
   await db.batch([...st, bump(db)]);
   return ver(db);

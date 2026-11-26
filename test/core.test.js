@@ -62,6 +62,15 @@ assert.deepEqual(M.manual, { 김빡통: { art: { 12: 3 } } }); // 버려진 hist
 assert.deepEqual(M.alias, { 옛: '김빡통', 빡통: '김빡통' });
 const R = { students: {}, manual: {}, alias: {} }; C.mergeInto(R, '없는이름', '대표'); // 존재하지 않는 이름은 별칭만 등록
 assert.deepEqual([R.students, R.alias], [{}, { 없는이름: '대표' }]);
+
+// 캠프 수동 지정: 자동은 복수 캠프 경고지만 지정하면 그 캠프 범위만 채점하고 경고 없음
+const two = { name: 'C', answers: { camp: { 1: '1', 6: '2', 16: '4' } } };
+const auto = C.scoreStudent(cfg, two); assert.equal(auto.flags.length, 1);
+const forced = C.scoreStudent(cfg, { ...two, camp: '나래' });
+assert.deepEqual([forced.camp, forced.campForced, forced.flags.length, forced.subjects.camp.score], ['나래', true, 0, 8]);
+assert.equal(C.scoreStudent(cfg, { ...two, camp: '여백' }).subjects.camp.score, 4); // 여백 범위(1~5)에는 6번이 없음: 16번만 정답
+assert.equal(C.analyze(cfg, { C: two }, {}, { C: '악동' }).rows[0].res.camp, '악동');
+assert.equal(C.scoreStudent(cfg, { ...two, camp: '없는캠프' }).camp, auto.camp); // 알 수 없는 캠프는 무시하고 자동 판별
 console.log('ok');
 
 // 기본 설정 점검: 서술 외에는 정답이 모두 있고 형식이 맞아야 함

@@ -52,6 +52,19 @@ assert.equal((await call('POST', 'op', { type: 'merge', from: 'a', to: 'a' }))[0
 await call('POST', 'op', { type: 'clearAll' });
 assert.deepEqual((await call('GET', 'state'))[1].alias, {});
 
+// 캠프 수동 지정: 저장, 해제, 병합 때 이전, 삭제 때 정리
+await call('POST', 'op', { type: 'putAnswers', rows: [{ name: '가', subject: 'art', answers: { 1: '1' } }, { name: '나', subject: 'art', answers: { 1: '2' } }] });
+await call('POST', 'op', { type: 'setCamp', name: '가', camp: '여백' });
+await call('POST', 'op', { type: 'setCamp', name: '나', camp: '나래' });
+assert.deepEqual((await call('GET', 'state'))[1].campOf, { 가: '여백', 나: '나래' });
+await call('POST', 'op', { type: 'setCamp', name: '나', camp: null });
+await call('POST', 'op', { type: 'merge', from: '가', to: '다' });
+assert.deepEqual((await call('GET', 'state'))[1].campOf, { 다: '여백' });
+assert.equal((await call('POST', 'op', { type: 'setCamp', name: '', camp: '여백' }))[0], 400);
+await call('POST', 'op', { type: 'delStudent', name: '다' });
+assert.deepEqual((await call('GET', 'state'))[1].campOf, {});
+await call('POST', 'op', { type: 'clearAll' });
+
 const pre = await onRequest({ request: new Request('http://x/api/op', { method: 'OPTIONS' }), env, params: { route: ['op'] } });
 assert.equal(pre.status, 204);
 assert.equal(pre.headers.get('access-control-allow-origin'), '*');
